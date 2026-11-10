@@ -10,7 +10,7 @@ func TestValidateIDValidation(t *testing.T) {
 		}
 	}
 
-	invalidIDs := []string{"", "Task-1", "has space", "-leading", "invalid@char!", "a/b"}
+	invalidIDs := []string{"", "Task-1", "has space", "-leading", "invalid@char!", "a/b", "task.json", "v1.0.json"}
 	for _, id := range invalidIDs {
 		if err := ValidateID(id); err == nil {
 			t.Errorf("expected %q to be invalid, got nil", id)

@@ -18,7 +18,34 @@ func ValidateID(id string) error {
 	if !idRegex.MatchString(id) {
 		return fmt.Errorf("invalid identifier %q: must contain only lowercase letters, numbers, hyphens, dots, or underscores (up to 64 chars)", id)
 	}
+	if strings.HasSuffix(id, ".json") {
+		return fmt.Errorf("identifier %q must not end with .json extension", id)
+	}
 	return nil
+}
+
+// Slugify converts an arbitrary title or string into a valid, URL-safe identifier.
+func Slugify(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '-' || r == '_' {
+			if b.Len() > 0 && b.String()[b.Len()-1] != '-' {
+				b.WriteByte('-')
+			}
+		}
+	}
+	res := strings.Trim(b.String(), "-")
+	if len(res) > 64 {
+		res = res[:64]
+		res = strings.TrimRight(res, "-")
+	}
+	if res == "" {
+		res = "item"
+	}
+	return res
 }
 
 // ProjectManifest defines the immutable or root metadata of a Keel project.

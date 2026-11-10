@@ -204,6 +204,17 @@ func TestDeleteTaskAndGoal(t *testing.T) {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
 
+	depTask := model.Task{
+		ID:        "task-dependent",
+		GoalID:    "goal-to-delete",
+		Title:     "Dependent Task",
+		Status:    "pending",
+		DependsOn: []string{"task-to-delete"},
+	}
+	if err := s.CreateTask(depTask); err != nil {
+		t.Fatalf("CreateTask depTask failed: %v", err)
+	}
+
 	// Delete task
 	if err := s.DeleteTask("task-to-delete"); err != nil {
 		t.Fatalf("DeleteTask failed: %v", err)
@@ -211,6 +222,15 @@ func TestDeleteTaskAndGoal(t *testing.T) {
 	_, err = s.GetTask("task-to-delete")
 	if err == nil {
 		t.Errorf("expected task to be deleted")
+	}
+
+	// Verify cascade unlinked task-to-delete from task-dependent.DependsOn
+	depAfterTaskDelete, err := s.GetTask("task-dependent")
+	if err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	if len(depAfterTaskDelete.DependsOn) != 0 {
+		t.Errorf("expected task-to-delete to be unlinked from DependsOn, got: %v", depAfterTaskDelete.DependsOn)
 	}
 
 	// Set current goal
@@ -229,6 +249,15 @@ func TestDeleteTaskAndGoal(t *testing.T) {
 	state, err = s.State()
 	if err != nil || state.CurrentGoalID != "" {
 		t.Errorf("expected current goal ID to be reset after deleting active goal")
+	}
+
+	// Verify cascade unlinked goal-to-delete from task-dependent.GoalID
+	depAfterGoalDelete, err := s.GetTask("task-dependent")
+	if err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	if depAfterGoalDelete.GoalID != "" {
+		t.Errorf("expected goal-to-delete to be unlinked from GoalID, got: %q", depAfterGoalDelete.GoalID)
 	}
 }
 
@@ -401,5 +430,46 @@ func TestStoreSecurityAndAgentRulePreservation(t *testing.T) {
 	}
 	if !strings.Contains(content, "keel brief") {
 		t.Errorf("keel brief section was not appended! content: %s", content)
+	}
+}
+
+func TestUniqueSlugGeneration(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "keel-slug-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s, err := Init(tmpDir, "Slug Test", "Testing slug generation")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task1 := model.Task{
+		ID:     "database-migration",
+		Title:  "Database Migration",
+		Status: "pending",
+	}
+	if err := s.CreateTask(task1); err != nil {
+		t.Fatal(err)
+	}
+
+	slug2 := s.GenerateUniqueTaskID("Database Migration")
+	if slug2 != "database-migration-2" {
+		t.Errorf("expected slug 'database-migration-2', got %q", slug2)
+	}
+
+	task2 := model.Task{
+		ID:     slug2,
+		Title:  "Database Migration",
+		Status: "pending",
+	}
+	if err := s.CreateTask(task2); err != nil {
+		t.Fatal(err)
+	}
+
+	slug3 := s.GenerateUniqueTaskID("Database Migration")
+	if slug3 != "database-migration-3" {
+		t.Errorf("expected slug 'database-migration-3', got %q", slug3)
 	}
 }

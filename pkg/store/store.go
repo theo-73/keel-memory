@@ -243,13 +243,31 @@ func (s *Store) DeleteGoal(id string) error {
 			return fmt.Errorf("delete goal %s: %w", id, err)
 		}
 
+		// Cascade: unassign deleted goal from any existing tasks
+		tasks, _ := s.ListTasks()
+		var cascadeErrs []error
+		for _, t := range tasks {
+			if t.GoalID == id {
+				t.GoalID = ""
+				t.UpdatedAt = time.Now().UTC()
+				if err := platform.AtomicWriteJSON(filepath.Join(s.Root, "tasks", t.ID+".json"), t); err != nil {
+					cascadeErrs = append(cascadeErrs, fmt.Errorf("cascade unassign goal from task %s: %w", t.ID, err))
+				}
+			}
+		}
+
 		state, err := s.State()
 		if err == nil {
 			if state.CurrentGoalID == id {
 				state.CurrentGoalID = ""
 			}
 			state.UpdatedAt = time.Now().UTC()
-			_ = s.SaveState(state)
+			if err := s.SaveState(state); err != nil {
+				cascadeErrs = append(cascadeErrs, fmt.Errorf("cascade clear current goal in state: %w", err))
+			}
+		}
+		if len(cascadeErrs) > 0 {
+			return errors.Join(cascadeErrs...)
 		}
 		return nil
 	})
@@ -358,8 +376,46 @@ func (s *Store) DeleteTask(id string) error {
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("delete task %s: %w", id, err)
 		}
+
+		// Cascade: remove deleted task from DependsOn in downstream tasks
+		tasks, _ := s.ListTasks()
+		var cascadeErrs []error
+		for _, t := range tasks {
+			changed := false
+			newDeps := make([]string, 0, len(t.DependsOn))
+			for _, dep := range t.DependsOn {
+				if dep == id {
+					changed = true
+				} else {
+					newDeps = append(newDeps, dep)
+				}
+			}
+			if changed {
+				t.DependsOn = newDeps
+				t.UpdatedAt = time.Now().UTC()
+				if err := platform.AtomicWriteJSON(filepath.Join(s.Root, "tasks", t.ID+".json"), t); err != nil {
+					cascadeErrs = append(cascadeErrs, fmt.Errorf("cascade remove dep from task %s: %w", t.ID, err))
+				}
+			}
+		}
+		if len(cascadeErrs) > 0 {
+			return errors.Join(cascadeErrs...)
+		}
+
 		return s.reconcileStateLocked()
 	})
+}
+
+// GenerateUniqueTaskID converts a task title into a unique URL-safe slug, appending -2, -3, etc. if collisions occur.
+func (s *Store) GenerateUniqueTaskID(title string) string {
+	base := model.Slugify(title)
+	candidate := base
+	for i := 2; ; i++ {
+		if _, err := s.GetTask(candidate); err != nil {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s-%d", base, i)
+	}
 }
 
 // ReconcileState re-evaluates the task graph and synchronizes active/blocked tasks and project health.
