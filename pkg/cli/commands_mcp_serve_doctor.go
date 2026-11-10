@@ -50,6 +50,7 @@ func (a *App) cmdServe(args []string) int {
 	}
 
 	srv := dashboard.NewServer(s)
+	defer srv.Close()
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 
 	listener, err := net.Listen("tcp", addr)
@@ -178,6 +179,33 @@ func (a *App) cmdDoctor(args []string) int {
 	// 4. Goals check
 	goals, _ := s.ListGoals()
 	fmt.Fprintf(a.Out, "✓ Goals: %d registered\n", len(goals))
+	goalSet := make(map[string]bool)
+	for _, g := range goals {
+		goalSet[g.ID] = true
+	}
+
+	hasGoalIssues := false
+	if state.CurrentGoalID != "" && !goalSet[state.CurrentGoalID] {
+		fmt.Fprintf(a.Err, "\n⚠️  Active goal %q no longer exists in goals/\n", state.CurrentGoalID)
+		hasGoalIssues = true
+	}
+
+	var orphanedTasks []string
+	for _, t := range tasks {
+		if t.GoalID != "" && !goalSet[t.GoalID] {
+			orphanedTasks = append(orphanedTasks, fmt.Sprintf("Task %q references missing goal %q", t.ID, t.GoalID))
+		}
+	}
+	if len(orphanedTasks) > 0 {
+		fmt.Fprintf(a.Err, "\n⚠️  Tasks with Missing Goals Detected:\n")
+		for _, o := range orphanedTasks {
+			fmt.Fprintf(a.Err, "    - %s\n", o)
+		}
+		hasGoalIssues = true
+	}
+	if hasGoalIssues {
+		return 1
+	}
 
 	// 5. Worklogs check
 	logs, _ := s.ListWorklogs()

@@ -114,8 +114,9 @@ Subcommands:
 			return 1
 		}
 
+		normalizedFilter := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(*statusFilter)), "-", "_")
 		var filtered []model.Task
-		if *statusFilter == "ready" {
+		if normalizedFilter == "ready" {
 			eval, err := taskgraph.Evaluate(tasks)
 			if err != nil {
 				fmt.Fprintf(a.Err, "Error evaluating task graph: %v\n", err)
@@ -124,7 +125,7 @@ Subcommands:
 			for _, r := range eval.Ready {
 				filtered = append(filtered, r.Task)
 			}
-		} else if *statusFilter == "blocked" {
+		} else if normalizedFilter == "blocked" {
 			eval, err := taskgraph.Evaluate(tasks)
 			if err != nil {
 				fmt.Fprintf(a.Err, "Error evaluating task graph: %v\n", err)
@@ -135,7 +136,7 @@ Subcommands:
 			}
 		} else {
 			for _, t := range tasks {
-				if *statusFilter == "" || t.Status == *statusFilter {
+				if normalizedFilter == "" || t.Status == normalizedFilter {
 					filtered = append(filtered, t)
 				}
 			}
@@ -274,8 +275,9 @@ Subcommands:
 			return 1
 		}
 
-		if *status != "" {
-			task.Status = *status
+		normStatus := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(*status)), "-", "_")
+		if normStatus != "" {
+			task.Status = normStatus
 		}
 		if *result != "" {
 			task.Result = *result
@@ -284,7 +286,7 @@ Subcommands:
 			task.BlockedReason = *blocked
 		}
 		// Auto-clear blocked reason on progression or explicit unblock
-		if *unblock || (*status != "" && *status != "blocked" && *blocked == "") {
+		if *unblock || (normStatus != "" && normStatus != "blocked" && *blocked == "") {
 			task.BlockedReason = ""
 		}
 		if *clearDeps {
