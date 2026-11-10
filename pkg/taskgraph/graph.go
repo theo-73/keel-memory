@@ -3,6 +3,7 @@ package taskgraph
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"keel/pkg/model"
 )
@@ -93,7 +94,7 @@ func Evaluate(tasks []model.Task) (GraphResult, error) {
 }
 
 func priorityScore(p string) int {
-	switch p {
+	switch strings.ToLower(strings.TrimSpace(p)) {
 	case "critical":
 		return 4
 	case "high":

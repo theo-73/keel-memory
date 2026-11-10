@@ -44,6 +44,14 @@ func ValidateTask(t Task) error {
 	default:
 		return fmt.Errorf("invalid task status %q", t.Status)
 	}
+	if t.Priority != "" {
+		switch strings.ToLower(strings.TrimSpace(t.Priority)) {
+		case "low", "medium", "high", "critical":
+			// valid
+		default:
+			return fmt.Errorf("invalid task priority %q (allowed: low, medium, high, critical)", t.Priority)
+		}
+	}
 	for _, dep := range t.DependsOn {
 		if err := ValidateID(dep); err != nil {
 			return fmt.Errorf("task dependsOn %q: %w", dep, err)

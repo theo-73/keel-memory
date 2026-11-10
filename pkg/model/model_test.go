@@ -49,3 +49,31 @@ func TestValidateTaskSelfDependency(t *testing.T) {
 		t.Error("expected self-dependency error, got nil")
 	}
 }
+
+func TestValidateTaskPriority(t *testing.T) {
+	validPriorities := []string{"", "low", "medium", "high", "critical", "LOW", " HIGH ", "Critical"}
+	for _, p := range validPriorities {
+		task := Task{
+			ID:       "task-p",
+			Title:    "Valid Priority",
+			Status:   "pending",
+			Priority: p,
+		}
+		if err := ValidateTask(task); err != nil {
+			t.Errorf("expected priority %q to be valid, got: %v", p, err)
+		}
+	}
+
+	invalidPriorities := []string{"urgent", "P0", "blocker", "normal", "highest"}
+	for _, p := range invalidPriorities {
+		task := Task{
+			ID:       "task-bad",
+			Title:    "Invalid Priority",
+			Status:   "pending",
+			Priority: p,
+		}
+		if err := ValidateTask(task); err == nil {
+			t.Errorf("expected priority %q to be invalid, got nil", p)
+		}
+	}
+}

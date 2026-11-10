@@ -42,3 +42,30 @@ func TestEvaluateCycleDetection(t *testing.T) {
 		t.Fatal("expected dependency cycle error, got nil")
 	}
 }
+
+func TestPriorityScoreNormalization(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected int
+	}{
+		{"critical", 4},
+		{"CRITICAL", 4},
+		{" Critical ", 4},
+		{"high", 3},
+		{"HIGH", 3},
+		{" High ", 3},
+		{"medium", 2},
+		{"Medium", 2},
+		{"low", 1},
+		{"LOW", 1},
+		{"unknown", 0},
+		{"", 0},
+	}
+
+	for _, tc := range cases {
+		score := priorityScore(tc.input)
+		if score != tc.expected {
+			t.Errorf("priorityScore(%q) = %d, expected %d", tc.input, score, tc.expected)
+		}
+	}
+}
