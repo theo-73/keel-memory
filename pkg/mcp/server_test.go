@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"keel/pkg/model"
 	"keel/pkg/store"
 )
 
@@ -121,5 +122,76 @@ func TestMCPServerGoalsAndResources(t *testing.T) {
 	_, err = s.GetTask("task-del")
 	if err == nil {
 		t.Fatalf("expected task-del to be deleted")
+	}
+}
+
+func TestMCPExtendedTools(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "keel-mcp-ext-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s, err := store.Init(tmpDir, "MCP Extended Test", "Testing new MCP tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Setup initial goal, task, worklog
+	_ = s.CreateGoal(model.Goal{ID: "g1", Title: "Initial Goal", Outcome: "Active outcome", Status: "active"})
+	_ = s.CreateGoal(model.Goal{ID: "g2", Title: "Goal to Delete", Outcome: "Temporary", Status: "active"})
+	_ = s.CreateTask(model.Task{ID: "t1", Title: "Initial Task", GoalID: "g1", Status: "pending"})
+	_ = s.RecordWorklog(model.WorklogEntry{Harness: "test-harness", Summary: "Recorded progress", NextSteps: []string{"verify"}})
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"keel_task_get","arguments":{"id":"t1"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"keel_goal_get","arguments":{"id":"g1"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"keel_goal_select","arguments":{"id":"g1"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"keel_task_update","arguments":{"id":"t1","goalId":"g2","deliverables":["bin/app","docs/spec.md"],"priority":"critical"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"keel_worklog_list","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"keel_goal_delete","arguments":{"id":"g2"}}}`,
+	}, "\n") + "\n"
+
+	in := strings.NewReader(input)
+	var out bytes.Buffer
+
+	server := NewServer(s, in, &out)
+	if err := server.Run(); err != nil {
+		t.Fatalf("server Run failed: %v", err)
+	}
+
+	outputLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(outputLines) != 6 {
+		t.Fatalf("expected 6 responses, got %d. Output:\n%s", len(outputLines), out.String())
+	}
+
+	// 1. Verify task update applied goalId, deliverables, priority
+	task, err := s.GetTask("t1")
+	if err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	if task.GoalID != "g2" {
+		t.Errorf("expected task GoalID to be g2, got %q", task.GoalID)
+	}
+	if len(task.Deliverables) != 2 || task.Deliverables[0] != "bin/app" {
+		t.Errorf("expected deliverables [bin/app docs/spec.md], got %v", task.Deliverables)
+	}
+	if task.Priority != "critical" {
+		t.Errorf("expected priority critical, got %q", task.Priority)
+	}
+
+	// 2. Verify active goal is g1
+	state, err := s.State()
+	if err != nil {
+		t.Fatalf("State failed: %v", err)
+	}
+	if state.CurrentGoalID != "g1" {
+		t.Errorf("expected currentGoalId g1, got %q", state.CurrentGoalID)
+	}
+
+	// 3. Verify g2 was deleted
+	_, err = s.GetGoal("g2")
+	if err == nil {
+		t.Errorf("expected goal g2 to be deleted, but still found")
 	}
 }

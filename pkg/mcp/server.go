@@ -155,7 +155,20 @@ func (s *Server) getToolsList() []Tool {
 					"title":         {Type: "string", Description: "Updated title"},
 					"description":   {Type: "string", Description: "Updated description"},
 					"priority":      {Type: "string", Description: "Updated priority", Enum: []string{"low", "medium", "high", "critical"}},
+					"goalId":        {Type: "string", Description: "Associated goal ID"},
 					"dependsOn":     {Type: "array", Description: "Updated dependencies", Items: &ItemDef{Type: "string"}},
+					"deliverables":  {Type: "array", Description: "Updated deliverables", Items: &ItemDef{Type: "string"}},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "keel_task_get",
+			Description: "Get complete details and status for a single task by ID.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"id": {Type: "string", Description: "Task ID to inspect"},
 				},
 				Required: []string{"id"},
 			},
@@ -186,6 +199,39 @@ func (s *Server) getToolsList() []Tool {
 			},
 		},
 		{
+			Name:        "keel_goal_get",
+			Description: "Get complete details for a single goal by ID.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"id": {Type: "string", Description: "Goal ID to inspect"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "keel_goal_select",
+			Description: "Set the currently active project goal.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"id": {Type: "string", Description: "Goal ID to activate"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "keel_goal_delete",
+			Description: "Delete a project goal by ID.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"id": {Type: "string", Description: "Goal ID to delete"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
 			Name:        "keel_goal_list",
 			Description: "List all project goals.",
 			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
@@ -204,6 +250,11 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+		},
+		{
+			Name:        "keel_worklog_list",
+			Description: "List all historical session worklog checkpoints.",
+			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
 		},
 		{
 			Name:        "keel_task_ready",
@@ -352,7 +403,9 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 			Title         string   `json:"title"`
 			Description   string   `json:"description"`
 			Priority      string   `json:"priority"`
+			GoalID        string   `json:"goalId"`
 			DependsOn     []string `json:"dependsOn"`
+			Deliverables  []string `json:"deliverables"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
 			s.sendToolError(id, err.Error())
@@ -384,14 +437,36 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 		if args.Priority != "" {
 			task.Priority = args.Priority
 		}
+		if args.GoalID != "" {
+			task.GoalID = args.GoalID
+		}
 		if args.DependsOn != nil {
 			task.DependsOn = args.DependsOn
+		}
+		if args.Deliverables != nil {
+			task.Deliverables = args.Deliverables
 		}
 		if err := s.store.UpdateTask(task); err != nil {
 			s.sendToolError(id, err.Error())
 			return
 		}
 		s.sendToolSuccess(id, fmt.Sprintf("Task %q updated successfully", task.ID))
+
+	case "keel_task_get":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		task, err := s.store.GetTask(args.ID)
+		if err != nil {
+			s.sendToolError(id, fmt.Sprintf("Task %q not found: %v", args.ID, err))
+			return
+		}
+		data, _ := json.MarshalIndent(task, "", "  ")
+		s.sendToolSuccess(id, string(data))
 
 	case "keel_task_delete":
 		var args struct {
@@ -465,6 +540,59 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 			return
 		}
 		s.sendToolSuccess(id, fmt.Sprintf("Goal %q updated successfully", goal.ID))
+
+	case "keel_goal_get":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		goal, err := s.store.GetGoal(args.ID)
+		if err != nil {
+			s.sendToolError(id, fmt.Sprintf("Goal %q not found: %v", args.ID, err))
+			return
+		}
+		data, _ := json.MarshalIndent(goal, "", "  ")
+		s.sendToolSuccess(id, string(data))
+
+	case "keel_goal_select":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		if err := s.store.SetCurrentGoal(args.ID); err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		s.sendToolSuccess(id, fmt.Sprintf("Active goal set to %q", args.ID))
+
+	case "keel_goal_delete":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		if err := s.store.DeleteGoal(args.ID); err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		s.sendToolSuccess(id, fmt.Sprintf("Goal %q deleted successfully", args.ID))
+
+	case "keel_worklog_list":
+		logs, err := s.store.ListWorklogs()
+		if err != nil {
+			s.sendToolError(id, err.Error())
+			return
+		}
+		data, _ := json.MarshalIndent(logs, "", "  ")
+		s.sendToolSuccess(id, string(data))
 
 	case "keel_worklog_record":
 		var args struct {
