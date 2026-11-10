@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"keel/pkg/model"
@@ -353,5 +354,52 @@ func TestLatestWorklogO1(t *testing.T) {
 	}
 	if latest.Harness != "antigravity" {
 		t.Errorf("expected harness 'antigravity', got %q", latest.Harness)
+	}
+}
+
+func TestStoreSecurityAndAgentRulePreservation(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "keel-security-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s, err := Init(tmpDir, "Security Test", "Testing security checks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Path traversal attempts on GetTask and GetGoal
+	invalidIDs := []string{"../../etc/passwd", "task/sub", "task..name", "../config"}
+	for _, badID := range invalidIDs {
+		if _, err := s.GetTask(badID); err == nil {
+			t.Errorf("expected GetTask(%q) to fail with validation/traversal error, got nil", badID)
+		}
+		if _, err := s.GetGoal(badID); err == nil {
+			t.Errorf("expected GetGoal(%q) to fail with validation/traversal error, got nil", badID)
+		}
+	}
+
+	// 2. Existing agent rules should not be clobbered by InstallAgentRules
+	existingClaude := "# Custom User Claude Instructions\n- Do not run tests on Friday\n"
+	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte(existingClaude), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.InstallAgentRules(); err != nil {
+		t.Fatalf("InstallAgentRules failed: %v", err)
+	}
+
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Do not run tests on Friday") {
+		t.Errorf("pre-existing instructions were destroyed! content: %s", content)
+	}
+	if !strings.Contains(content, "keel brief") {
+		t.Errorf("keel brief section was not appended! content: %s", content)
 	}
 }

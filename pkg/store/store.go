@@ -172,6 +172,12 @@ func (s *Store) CreateGoal(g model.Goal) error {
 }
 
 func (s *Store) GetGoal(id string) (model.Goal, error) {
+	if err := model.ValidateID(id); err != nil {
+		return model.Goal{}, fmt.Errorf("invalid goal id %q: %w", id, err)
+	}
+	if !platform.IsProjectRelative(id) {
+		return model.Goal{}, fmt.Errorf("invalid path traversal in goal id %q", id)
+	}
 	path := filepath.Join(s.Root, "goals", id+".json")
 	return platform.ReadJSON[model.Goal](path)
 }
@@ -250,6 +256,9 @@ func (s *Store) DeleteGoal(id string) error {
 }
 
 func (s *Store) SetCurrentGoal(id string) error {
+	if err := model.ValidateID(id); err != nil {
+		return fmt.Errorf("invalid goal id %q: %w", id, err)
+	}
 	if _, err := s.GetGoal(id); err != nil {
 		return fmt.Errorf("goal %q not found: %w", id, err)
 	}
@@ -285,6 +294,12 @@ func (s *Store) CreateTask(t model.Task) error {
 }
 
 func (s *Store) GetTask(id string) (model.Task, error) {
+	if err := model.ValidateID(id); err != nil {
+		return model.Task{}, fmt.Errorf("invalid task id %q: %w", id, err)
+	}
+	if !platform.IsProjectRelative(id) {
+		return model.Task{}, fmt.Errorf("invalid path traversal in task id %q", id)
+	}
 	path := filepath.Join(s.Root, "tasks", id+".json")
 	return platform.ReadJSON[model.Task](path)
 }
@@ -550,6 +565,17 @@ func (s *Store) LatestWorklog() (*model.WorklogEntry, error) {
 	return nil, nil
 }
 
+func writeOrAppendRule(path, content string) error {
+	if data, err := os.ReadFile(path); err == nil {
+		if strings.Contains(string(data), "keel brief") {
+			return nil // Already configured
+		}
+		newContent := strings.TrimRight(string(data), "\r\n") + "\n\n" + content + "\n"
+		return os.WriteFile(path, []byte(newContent), 0644)
+	}
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
 // InstallAgentRules configures instructions for Claude Code, Cursor, Codex, and Antigravity.
 func (s *Store) InstallAgentRules() error {
 	agentsMD := `# Keel Project Agent Guide
@@ -575,7 +601,7 @@ Always leave notes for the next agent:
 keel worklog "Summary of work done" --next "Immediate next task"
 ` + "```" + `
 `
-	if err := os.WriteFile(filepath.Join(s.Root, "AGENTS.md"), []byte(agentsMD), 0644); err != nil {
+	if err := writeOrAppendRule(filepath.Join(s.Root, "AGENTS.md"), agentsMD); err != nil {
 		return err
 	}
 
@@ -585,7 +611,7 @@ Always start your work by checking project context:
 - Mark tasks completed using 'keel task update <id> --status completed'.
 - Before ending your turn, record a worklog using 'keel worklog "<summary>"'.
 `
-	if err := os.WriteFile(filepath.Join(s.Root, "CLAUDE.md"), []byte(claudeMD), 0644); err != nil {
+	if err := writeOrAppendRule(filepath.Join(s.Root, "CLAUDE.md"), claudeMD); err != nil {
 		return err
 	}
 
@@ -602,7 +628,7 @@ globs: *
 	if err := platform.EnsureDir(cursorDir); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(cursorDir, "keel.mdc"), []byte(cursorRule), 0644); err != nil {
+	if err := writeOrAppendRule(filepath.Join(cursorDir, "keel.mdc"), cursorRule); err != nil {
 		return err
 	}
 
@@ -611,7 +637,7 @@ globs: *
 - Query ready tasks with 'keel task ready' and maintain accurate task states.
 - Leave session handoffs before exit via 'keel worklog "<summary>" --next "<next-steps>"'.
 `
-	if err := os.WriteFile(filepath.Join(s.Root, ".windsurfrules"), []byte(windsurfRules), 0644); err != nil {
+	if err := writeOrAppendRule(filepath.Join(s.Root, ".windsurfrules"), windsurfRules); err != nil {
 		return err
 	}
 
@@ -625,5 +651,5 @@ This repository utilizes Keel for persistent agent memory, goal alignment, and s
 - Task Lifecycle: Update task status using 'keel task update <id> --status completed'.
 - Checkpoints: Record worklogs before session completion via 'keel worklog "<summary>" --next "<next-steps>"'.
 `
-	return os.WriteFile(filepath.Join(copilotDir, "copilot-instructions.md"), []byte(copilotMD), 0644)
+	return writeOrAppendRule(filepath.Join(copilotDir, "copilot-instructions.md"), copilotMD)
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -123,6 +125,37 @@ func (a *App) cmdDoctor(args []string) int {
 	}
 
 	fmt.Fprintf(a.Out, "Running Keel Project Doctor on %s...\n\n", s.Root)
+
+	// 0. Check for Corrupt JSON Files
+	var corruptFiles []string
+	checkJSONDir := func(subdir string) {
+		dirPath := filepath.Join(s.Root, subdir)
+		entries, dirErr := os.ReadDir(dirPath)
+		if dirErr != nil {
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+				filePath := filepath.Join(dirPath, e.Name())
+				data, readErr := os.ReadFile(filePath)
+				if readErr != nil || !json.Valid(data) {
+					corruptFiles = append(corruptFiles, filepath.Join(subdir, e.Name()))
+				}
+			}
+		}
+	}
+	checkJSONDir("tasks")
+	checkJSONDir("goals")
+	checkJSONDir("state")
+	checkJSONDir("worklogs")
+
+	if len(corruptFiles) > 0 {
+		fmt.Fprintf(a.Err, "❌ Corrupted JSON files detected on disk:\n")
+		for _, cf := range corruptFiles {
+			fmt.Fprintf(a.Err, "    - %s\n", cf)
+		}
+		return 1
+	}
 
 	// 1. Check Manifest
 	manifest, err := s.Manifest()
