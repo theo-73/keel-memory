@@ -57,12 +57,22 @@ func (l *Locker) Acquire(key string) (func(), error) {
 		file, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err == nil {
 			// Lock acquired! Record PID and Timestamp
-			info := fmt.Sprintf("pid=%d\ncreatedAt=%s\nkey=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano), key)
+			acquiredPID := os.Getpid()
+			acquiredTime := time.Now().UTC()
+			timeStr := acquiredTime.Format(time.RFC3339Nano)
+			info := fmt.Sprintf("pid=%d\ncreatedAt=%s\nkey=%s\n", acquiredPID, timeStr, key)
 			_, _ = file.WriteString(info)
 			_ = file.Close()
 
 			return func() {
-				_ = os.Remove(lockPath)
+				data, readErr := os.ReadFile(lockPath)
+				if readErr == nil {
+					content := string(data)
+					if strings.Contains(content, fmt.Sprintf("pid=%d", acquiredPID)) &&
+						strings.Contains(content, timeStr) {
+						_ = os.Remove(lockPath)
+					}
+				}
 			}, nil
 		}
 
