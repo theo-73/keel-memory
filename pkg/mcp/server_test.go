@@ -149,7 +149,10 @@ func TestMCPExtendedTools(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"keel_goal_select","arguments":{"id":"g1"}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"keel_task_update","arguments":{"id":"t1","goalId":"g2","deliverables":["bin/app","docs/spec.md"],"priority":"critical"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"keel_worklog_list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"keel_goal_delete","arguments":{"id":"g2"}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"keel_task_list","arguments":{"goalId":"g2"}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"prompts/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":8,"method":"prompts/get","params":{"name":"keel_orient"}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"keel_goal_delete","arguments":{"id":"g2"}}}`,
 	}, "\n") + "\n"
 
 	in := strings.NewReader(input)
@@ -161,8 +164,8 @@ func TestMCPExtendedTools(t *testing.T) {
 	}
 
 	outputLines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(outputLines) != 6 {
-		t.Fatalf("expected 6 responses, got %d. Output:\n%s", len(outputLines), out.String())
+	if len(outputLines) != 9 {
+		t.Fatalf("expected 9 responses, got %d. Output:\n%s", len(outputLines), out.String())
 	}
 
 	// 1. Verify task update applied goalId, deliverables, priority

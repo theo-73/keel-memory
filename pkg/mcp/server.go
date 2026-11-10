@@ -61,6 +61,7 @@ func (s *Server) handleRequest(req JSONRPCRequest) {
 			Capabilities: ServerCapabilities{
 				Tools:     &ToolsCapability{ListChanged: false},
 				Resources: &ResourcesCapability{Subscribe: false, ListChanged: false},
+				Prompts:   &PromptsCapability{ListChanged: false},
 			},
 			ServerInfo: ServerInfo{
 				Name:    "keel-memory",
@@ -71,6 +72,60 @@ func (s *Server) handleRequest(req JSONRPCRequest) {
 
 	case "ping":
 		s.sendResult(req.ID, map[string]any{})
+
+	case "prompts/list":
+		s.sendResult(req.ID, map[string]any{
+			"prompts": []Prompt{
+				{
+					Name:        "keel_orient",
+					Description: "Start of session: retrieve dense project brief, inspect ready tasks, and begin highest-priority work.",
+				},
+				{
+					Name:        "keel_checkpoint",
+					Description: "End of session: record completed deliverables, verify tests, and leave handoff worklog.",
+				},
+			},
+		})
+
+	case "prompts/get":
+		var params struct {
+			Name      string            `json:"name"`
+			Arguments map[string]string `json:"arguments,omitempty"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			s.sendError(req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+		switch params.Name {
+		case "keel_orient":
+			s.sendResult(req.ID, map[string]any{
+				"description": "Orientation prompt for starting an autonomous agent session.",
+				"messages": []PromptMessage{
+					{
+						Role: "user",
+						Content: PromptContent{
+							Type: "text",
+							Text: "Please start by invoking the 'keel_brief' tool to orient yourself with current project goals, health, and recent session notes. Then review ready tasks via 'keel_task_ready', select the highest-priority task, mark it in-progress using 'keel_task_update', and proceed with execution.",
+						},
+					},
+				},
+			})
+		case "keel_checkpoint":
+			s.sendResult(req.ID, map[string]any{
+				"description": "Checkpoint and handoff prompt for wrapping up an agent session.",
+				"messages": []PromptMessage{
+					{
+						Role: "user",
+						Content: PromptContent{
+							Type: "text",
+							Text: "Before finishing your turn, ensure all code compiles and test suites pass. Update any completed tasks with 'keel_task_update' providing the verified deliverables in 'result'. Finally, call 'keel_worklog_record' with a concise summary of your progress and clear 'next_steps' for the next session.",
+						},
+					},
+				},
+			})
+		default:
+			s.sendError(req.ID, -32602, fmt.Sprintf("Unknown prompt: %s", params.Name), nil)
+		}
 
 	case "tools/list":
 		s.sendResult(req.ID, map[string]any{
@@ -121,6 +176,10 @@ func (s *Server) getToolsList() []Tool {
 						Type:        "string",
 						Description: "Optional filter (ready, blocked, pending, in_progress, completed)",
 						Enum:        []string{"ready", "blocked", "pending", "in_progress", "completed"},
+					},
+					"goalId": {
+						Type:        "string",
+						Description: "Optional filter by associated goal ID",
 					},
 				},
 			},
@@ -340,6 +399,7 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 	case "keel_task_list":
 		var args struct {
 			Status string `json:"status"`
+			GoalID string `json:"goalId"`
 		}
 		_ = json.Unmarshal(params.Arguments, &args)
 
@@ -354,7 +414,17 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 				s.sendToolError(id, err.Error())
 				return
 			}
-			data, _ := json.MarshalIndent(eval.Ready, "", "  ")
+			res := eval.Ready
+			if args.GoalID != "" {
+				var filteredReady []taskgraph.TaskEvaluation
+				for _, r := range res {
+					if r.Task.GoalID == args.GoalID {
+						filteredReady = append(filteredReady, r)
+					}
+				}
+				res = filteredReady
+			}
+			data, _ := json.MarshalIndent(res, "", "  ")
 			s.sendToolSuccess(id, string(data))
 			return
 		}
@@ -364,14 +434,24 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 				s.sendToolError(id, err.Error())
 				return
 			}
-			data, _ := json.MarshalIndent(eval.Blocked, "", "  ")
+			res := eval.Blocked
+			if args.GoalID != "" {
+				var filteredBlocked []taskgraph.TaskEvaluation
+				for _, b := range res {
+					if b.Task.GoalID == args.GoalID {
+						filteredBlocked = append(filteredBlocked, b)
+					}
+				}
+				res = filteredBlocked
+			}
+			data, _ := json.MarshalIndent(res, "", "  ")
 			s.sendToolSuccess(id, string(data))
 			return
 		}
 
 		var filtered []model.Task
 		for _, t := range tasks {
-			if args.Status == "" || t.Status == args.Status {
+			if (args.Status == "" || t.Status == args.Status) && (args.GoalID == "" || t.GoalID == args.GoalID) {
 				filtered = append(filtered, t)
 			}
 		}

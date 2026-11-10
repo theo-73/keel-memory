@@ -38,6 +38,7 @@ type InitializeResult struct {
 type ServerCapabilities struct {
 	Tools     *ToolsCapability     `json:"tools,omitempty"`
 	Resources *ResourcesCapability `json:"resources,omitempty"`
+	Prompts   *PromptsCapability   `json:"prompts,omitempty"`
 }
 
 type ToolsCapability struct {
@@ -47,6 +48,32 @@ type ToolsCapability struct {
 type ResourcesCapability struct {
 	Subscribe   bool `json:"subscribe,omitempty"`
 	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+type PromptsCapability struct {
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+type Prompt struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
+}
+
+type PromptArgument struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+type PromptMessage struct {
+	Role    string        `json:"role"`
+	Content PromptContent `json:"content"`
+}
+
+type PromptContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type Tool struct {

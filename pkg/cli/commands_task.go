@@ -102,6 +102,7 @@ Subcommands:
 	case "list":
 		fs := flag.NewFlagSet("task list", flag.ContinueOnError)
 		statusFilter := fs.String("status", "", "Filter by status: ready, blocked, pending, in_progress, completed")
+		goalFilter := fs.String("goal", "", "Filter tasks by goal ID")
 		asJSON := fs.Bool("json", false, "Output as JSON")
 
 		if err := fs.Parse(subArgs); err != nil {
@@ -140,6 +141,17 @@ Subcommands:
 					filtered = append(filtered, t)
 				}
 			}
+		}
+
+		if *goalFilter != "" {
+			gf := strings.TrimSpace(*goalFilter)
+			byGoal := make([]model.Task, 0)
+			for _, t := range filtered {
+				if t.GoalID == gf {
+					byGoal = append(byGoal, t)
+				}
+			}
+			filtered = byGoal
 		}
 
 		if *asJSON {

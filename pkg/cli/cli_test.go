@@ -161,7 +161,22 @@ func TestCLIFullWorkflow(t *testing.T) {
 	}
 	runCmd("task", "delete", "t-broken")
 
-	// 16. Test help and unknown command handling
+	// 16. Test task list --goal filter
+	out, code = runCmd("task", "list", "--goal", "speed-checkout")
+	if code != 0 {
+		t.Fatalf("task list --goal failed: %s", out)
+	}
+
+	// 17. Test doctor corrupted JSON detection
+	corruptPath := "tasks/corrupt.json"
+	_ = os.WriteFile(corruptPath, []byte("NOT_VALID_JSON{"), 0644)
+	out, code = runCmd("doctor")
+	if code == 0 || !strings.Contains(out, "Corrupted JSON files detected") {
+		t.Fatalf("doctor should fail on corrupt JSON file, got: code=%d, out=%s", code, out)
+	}
+	_ = os.Remove(corruptPath)
+
+	// 18. Test help and unknown command handling
 	out, code = runCmd("help")
 	if code != 0 || !strings.Contains(out, "CORE COMMANDS") {
 		t.Fatalf("help failed: code=%d, out=%s", code, out)
