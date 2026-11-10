@@ -1,0 +1,21 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/keel
+bin/
+dist/
+
+# Test artifacts
+*.test
+*.out
+
+# Local runtime locks & temporary files
+.keel/locks/
+.keel-tmp-*
+
+# OS files
+.DS_Store
+Thumbs.db
