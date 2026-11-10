@@ -56,8 +56,17 @@ func (s *Server) handleRequest(req JSONRPCRequest) {
 
 	switch req.Method {
 	case "initialize":
+		var initParams struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		version := "2024-11-05"
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &initParams); err == nil && initParams.ProtocolVersion != "" {
+				version = initParams.ProtocolVersion
+			}
+		}
 		res := InitializeResult{
-			ProtocolVersion: "2024-11-05",
+			ProtocolVersion: version,
 			Capabilities: ServerCapabilities{
 				Tools:     &ToolsCapability{ListChanged: false},
 				Resources: &ResourcesCapability{Subscribe: false, ListChanged: false},
@@ -165,6 +174,7 @@ func (s *Server) getToolsList() []Tool {
 			Name:        "keel_brief",
 			Description: "Get the current project brief: orientation, goals, ready tasks, blocked tasks, and previous session notes.",
 			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_task_list",
@@ -183,6 +193,7 @@ func (s *Server) getToolsList() []Tool {
 					},
 				},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_task_create",
@@ -197,8 +208,9 @@ func (s *Server) getToolsList() []Tool {
 					"goalId":      {Type: "string", Description: "Associated goal ID"},
 					"dependsOn":   {Type: "array", Description: "List of prerequisite task IDs", Items: &ItemDef{Type: "string"}},
 				},
-				Required: []string{"id", "title"},
+				Required: []string{"title"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false},
 		},
 		{
 			Name:        "keel_task_update",
@@ -220,6 +232,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false},
 		},
 		{
 			Name:        "keel_task_get",
@@ -231,6 +244,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_task_delete",
@@ -242,6 +256,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false, DestructiveHint: true},
 		},
 		{
 			Name:        "keel_goal_create",
@@ -256,6 +271,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id", "title"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false},
 		},
 		{
 			Name:        "keel_goal_get",
@@ -267,6 +283,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_goal_select",
@@ -278,6 +295,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false},
 		},
 		{
 			Name:        "keel_goal_delete",
@@ -289,11 +307,13 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false, DestructiveHint: true},
 		},
 		{
 			Name:        "keel_goal_list",
 			Description: "List all project goals.",
 			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_goal_update",
@@ -309,21 +329,25 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"id"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false},
 		},
 		{
 			Name:        "keel_worklog_list",
 			Description: "List all historical session worklog checkpoints.",
 			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_task_ready",
 			Description: "List all currently actionable tasks whose dependencies are fully completed.",
 			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_doctor",
 			Description: "Run health diagnostics, check DAG integrity, and detect broken dependencies.",
 			InputSchema: InputSchema{Type: "object", Properties: map[string]PropertyDef{}},
+			Annotations: &ToolAnnotations{ReadOnlyHint: true},
 		},
 		{
 			Name:        "keel_worklog_record",
@@ -337,6 +361,7 @@ func (s *Server) getToolsList() []Tool {
 				},
 				Required: []string{"summary"},
 			},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false},
 		},
 	}
 }
@@ -464,6 +489,13 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 			s.sendToolError(id, err.Error())
 			return
 		}
+		if strings.TrimSpace(args.Title) == "" {
+			s.sendToolError(id, "Task title is required")
+			return
+		}
+		if args.ID == "" {
+			args.ID = s.store.GenerateUniqueTaskID(args.Title)
+		}
 		if args.Status == "" {
 			args.Status = "pending"
 		}
@@ -497,13 +529,17 @@ func (s *Server) handleToolCall(id any, rawParams json.RawMessage) {
 			return
 		}
 		if args.Status != "" {
-			task.Status = args.Status
+			task.Status = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(args.Status)), "-", "_")
 		}
 		if args.Result != "" {
 			task.Result = args.Result
 		}
 		if args.BlockedReason != "" {
 			task.BlockedReason = args.BlockedReason
+		}
+		// Auto-clear blocker when progressing away from blocked
+		if task.Status != "blocked" && args.BlockedReason == "" {
+			task.BlockedReason = ""
 		}
 		if args.Assignee != "" {
 			task.Assignee = args.Assignee

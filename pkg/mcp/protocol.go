@@ -76,10 +76,16 @@ type PromptContent struct {
 	Text string `json:"text"`
 }
 
+type ToolAnnotations struct {
+	ReadOnlyHint    bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool `json:"destructiveHint,omitempty"`
+}
+
 type Tool struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema InputSchema `json:"inputSchema"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema InputSchema      `json:"inputSchema"`
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 }
 
 type InputSchema struct {
