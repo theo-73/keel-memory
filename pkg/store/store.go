@@ -529,14 +529,25 @@ func (s *Store) ListWorklogs() ([]model.WorklogEntry, error) {
 }
 
 func (s *Store) LatestWorklog() (*model.WorklogEntry, error) {
-	logs, err := s.ListWorklogs()
+	entries, err := os.ReadDir(filepath.Join(s.Root, "worklogs"))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if len(logs) == 0 {
-		return nil, nil
+	// os.ReadDir returns entries in lexicographical order.
+	// Since worklogs are prefixed with YYYYMMDD_HHMMSS_..., scanning backward
+	// finds the latest checkpoint in O(1) without parsing the whole directory.
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].IsDir() && strings.HasSuffix(entries[i].Name(), ".json") {
+			w, err := platform.ReadJSON[model.WorklogEntry](filepath.Join(s.Root, "worklogs", entries[i].Name()))
+			if err == nil {
+				return &w, nil
+			}
+		}
 	}
-	return &logs[0], nil
+	return nil, nil
 }
 
 // InstallAgentRules configures instructions for Claude Code, Cursor, Codex, and Antigravity.

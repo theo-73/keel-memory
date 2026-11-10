@@ -314,3 +314,44 @@ func TestHealthNotAtRiskOnNormalPrerequisites(t *testing.T) {
 		t.Errorf("expected health 'on_track' for normal dependencies, got %q", state.Health)
 	}
 }
+
+func TestLatestWorklogO1(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "keel-worklog-o1-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s, err := Init(tmpDir, "Worklog Test", "Testing O(1) worklog retrieval")
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Initially nil
+	latest, err := s.LatestWorklog()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if latest != nil {
+		t.Fatalf("expected nil worklog initially, got %+v", latest)
+	}
+
+	// Record multiple worklogs
+	_ = s.RecordWorklog(model.WorklogEntry{Harness: "claude", Summary: "First session", NextSteps: []string{"next-1"}})
+	_ = s.RecordWorklog(model.WorklogEntry{Harness: "cursor", Summary: "Second session", NextSteps: []string{"next-2"}})
+	_ = s.RecordWorklog(model.WorklogEntry{Harness: "antigravity", Summary: "Third session - latest", NextSteps: []string{"done"}})
+
+	latest, err = s.LatestWorklog()
+	if err != nil {
+		t.Fatalf("LatestWorklog failed: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("expected latest worklog, got nil")
+	}
+	if latest.Summary != "Third session - latest" {
+		t.Errorf("expected summary 'Third session - latest', got %q", latest.Summary)
+	}
+	if latest.Harness != "antigravity" {
+		t.Errorf("expected harness 'antigravity', got %q", latest.Harness)
+	}
+}
