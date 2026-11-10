@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keel · Mission Control</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <span class="logo-badge">KEEL</span>
+        <h1 id="project-name">Loading Project...</h1>
+      </div>
+      <div class="live-indicator">
+        <span class="pulse-dot"></span>
+        <span id="connection-status">Live Connected</span>
+      </div>
+    </header>
+
+    <!-- Top KPI Metric Cards (5 Cards) -->
+    <div class="summary-grid" role="region" aria-label="Project Status Summary" aria-live="polite">
+      <div class="metric-card">
+        <div class="metric-title">Project Health</div>
+        <div class="metric-value"><span id="project-health" class="badge on_track">On Track</span></div>
+        <div id="project-phase" class="metric-subtitle">Phase: Active</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Ready to Execute</div>
+        <div id="stat-ready" class="metric-value">0</div>
+        <div class="metric-subtitle">Unblocked & actionable</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">In Progress</div>
+        <div id="stat-active" class="metric-value">0</div>
+        <div class="metric-subtitle">Active agent tasks</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Blocked</div>
+        <div id="stat-blocked" class="metric-value">0</div>
+        <div class="metric-subtitle">Waiting on dependencies</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Tasks Completed</div>
+        <div id="stat-completed" class="metric-value">0 / 0</div>
+        <div id="project-progress" class="metric-subtitle">0% complete</div>
+      </div>
+    </div>
+
+    <!-- Active Objective Banner (Full Width) -->
+    <div class="section-box objective-banner" role="region" aria-label="Current Objective">
+      <div class="section-header">
+        <h2 class="section-title">Active Objective & Goal</h2>
+      </div>
+      <div id="goal-content">
+        <p style="color:var(--text-muted); font-size:13px;">Loading goal...</p>
+      </div>
+    </div>
+
+    <!-- 4-Column Responsive Task Pipeline Grid -->
+    <div class="section-box" role="region" aria-label="Task Pipeline" aria-live="polite">
+      <div class="section-header">
+        <h2 class="section-title">Task Pipeline & Dependency Graph</h2>
+      </div>
+      <div id="task-kanban" class="kanban-grid">
+        <div class="kanban-col" id="col-ready">
+          <div class="col-header"><span class="col-title" id="title-ready">Ready to Execute</span><span class="category-count" id="count-ready">0</span></div>
+          <div class="col-cards" id="cards-ready"></div>
+        </div>
+        <div class="kanban-col" id="col-inprogress">
+          <div class="col-header"><span class="col-title" id="title-inprogress">In Progress</span><span class="category-count" id="count-inprogress">0</span></div>
+          <div class="col-cards" id="cards-inprogress"></div>
+        </div>
+        <div class="kanban-col" id="col-blocked">
+          <div class="col-header"><span class="col-title" id="title-blocked">Blocked</span><span class="category-count" id="count-blocked">0</span></div>
+          <div class="col-cards" id="cards-blocked"></div>
+        </div>
+        <div class="kanban-col" id="col-completed">
+          <div class="col-header"><span class="col-title" id="title-completed">Completed</span><span class="category-count" id="count-completed">0</span></div>
+          <div class="col-cards" id="cards-completed"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session Worklogs & Handoff Stream -->
+    <div class="section-box" role="region" aria-label="Session Log" aria-live="polite">
+      <div class="section-header">
+        <h2 class="section-title">Latest Agent Session Log & Handoff</h2>
+      </div>
+      <div id="latest-worklog">
+        <p style="color:var(--text-muted); font-size:13px;">Loading session notes...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
