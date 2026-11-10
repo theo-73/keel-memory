@@ -48,6 +48,13 @@ func Evaluate(tasks []model.Task) (GraphResult, error) {
 			res.Completed = append(res.Completed, t)
 		case "in_progress":
 			res.InProgress = append(res.InProgress, t)
+			if t.BlockedReason != "" {
+				res.Blocked = append(res.Blocked, TaskEvaluation{
+					Task:     t,
+					IsReady:  false,
+					Blockers: []string{"In-progress stalled: " + t.BlockedReason},
+				})
+			}
 		case "cancelled":
 			// Skip cancelled from ready/blocked queues
 		default:

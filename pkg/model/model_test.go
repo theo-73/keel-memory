@@ -48,6 +48,16 @@ func TestValidateTaskSelfDependency(t *testing.T) {
 	if err := ValidateTask(task); err == nil {
 		t.Error("expected self-dependency error, got nil")
 	}
+
+	taskDup := Task{
+		ID:        "task-2",
+		Title:     "Duplicate Dependent",
+		Status:    "pending",
+		DependsOn: []string{"task-a", "task-a"},
+	}
+	if err := ValidateTask(taskDup); err == nil {
+		t.Error("expected duplicate dependency error, got nil")
+	}
 }
 
 func TestValidateTaskPriority(t *testing.T) {

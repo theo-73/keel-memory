@@ -56,13 +56,14 @@ func AtomicWriteJSON(path string, data any) error {
 	}
 
 	// Rename atomically replaces existing file on POSIX and Windows (Go 1.5+)
+	backoffs := []time.Duration{10 * time.Millisecond, 25 * time.Millisecond, 50 * time.Millisecond, 100 * time.Millisecond, 150 * time.Millisecond, 200 * time.Millisecond}
 	var renameErr error
-	for i := 0; i < 3; i++ {
+	for _, delay := range backoffs {
 		renameErr = os.Rename(tempName, path)
 		if renameErr == nil {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(delay)
 	}
 	return fmt.Errorf("atomic rename to %s: %w", path, renameErr)
 }

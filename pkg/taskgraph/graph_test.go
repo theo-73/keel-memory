@@ -69,3 +69,29 @@ func TestPriorityScoreNormalization(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluateInProgressBlockedTask(t *testing.T) {
+	tasks := []model.Task{
+		{
+			ID:            "task-wip",
+			Title:         "Stalled active task",
+			Status:        "in_progress",
+			BlockedReason: "API quota exceeded",
+		},
+	}
+
+	result, err := Evaluate(tasks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.InProgress) != 1 {
+		t.Errorf("expected 1 in_progress task, got %d", len(result.InProgress))
+	}
+	if len(result.Blocked) != 1 {
+		t.Fatalf("expected 1 blocked evaluation for stalled task, got %d", len(result.Blocked))
+	}
+	if len(result.Blocked[0].Blockers) == 0 || result.Blocked[0].Blockers[0] != "In-progress stalled: API quota exceeded" {
+		t.Errorf("expected blocker message 'In-progress stalled: API quota exceeded', got %v", result.Blocked[0].Blockers)
+	}
+}

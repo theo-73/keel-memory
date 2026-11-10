@@ -52,6 +52,7 @@ func ValidateTask(t Task) error {
 			return fmt.Errorf("invalid task priority %q (allowed: low, medium, high, critical)", t.Priority)
 		}
 	}
+	seenDeps := make(map[string]bool)
 	for _, dep := range t.DependsOn {
 		if err := ValidateID(dep); err != nil {
 			return fmt.Errorf("task dependsOn %q: %w", dep, err)
@@ -59,6 +60,10 @@ func ValidateTask(t Task) error {
 		if dep == t.ID {
 			return fmt.Errorf("task cannot depend on itself")
 		}
+		if seenDeps[dep] {
+			return fmt.Errorf("duplicate dependency %q", dep)
+		}
+		seenDeps[dep] = true
 	}
 	return nil
 }
