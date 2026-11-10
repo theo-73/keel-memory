@@ -13,6 +13,49 @@ const ICONS = {
 let lastPayloadHash = '';
 const currentTaskMap = new Map();
 const currentGoalMap = new Map();
+let lastFocusedElement = null;
+const mainContainer = document.querySelector('.container');
+
+function trapFocus(dialog) {
+  lastFocusedElement = document.activeElement;
+  if (mainContainer) {
+    mainContainer.setAttribute('inert', '');
+  }
+  const focusables = dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (focusables.length > 0) {
+    focusables[0].focus();
+  }
+}
+
+function releaseFocus() {
+  if (mainContainer) {
+    mainContainer.removeAttribute('inert');
+  }
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    lastFocusedElement.focus();
+    lastFocusedElement = null;
+  }
+}
+
+function handleDialogKeyDown(e, dialog, closeFn) {
+  if (e.key === 'Escape') {
+    closeFn();
+    return;
+  }
+  if (e.key === 'Tab') {
+    const focusables = Array.from(dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(el => !el.disabled);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+}
 
 function renderProject(data) {
   const currentHash = JSON.stringify(data);
@@ -20,6 +63,17 @@ function renderProject(data) {
     return;
   }
   lastPayloadHash = currentHash;
+
+  // Track updated tasks for visual pulse
+  const updatedTaskIds = new Set();
+  if (data.tasks) {
+    data.tasks.forEach(t => {
+      const prev = currentTaskMap.get(t.id);
+      if (prev && (prev.status !== t.status || prev.updatedAt !== t.updatedAt || prev.result !== t.result)) {
+        updatedTaskIds.add(t.id);
+      }
+    });
+  }
 
   // Update in-memory caches
   currentTaskMap.clear();
@@ -39,6 +93,25 @@ function renderProject(data) {
   const healthEl = document.getElementById('project-health');
   healthEl.textContent = data.state.health ? data.state.health.replace('_', ' ') : 'on track';
   healthEl.className = 'badge ' + (data.state.health || 'on_track');
+
+  // Graph Error / Cycle Warning Banner
+  const errorBanner = document.getElementById('graph-error-banner');
+  const errorMsg = document.getElementById('graph-error-message');
+  if (data.graphError) {
+    if (errorBanner && errorMsg) {
+      errorMsg.textContent = data.graphError;
+      errorBanner.classList.remove('hidden');
+    }
+  } else if (data.state.risks && data.state.risks.length > 0) {
+    if (errorBanner && errorMsg) {
+      errorMsg.textContent = data.state.risks.join(' • ');
+      errorBanner.classList.remove('hidden');
+    }
+  } else {
+    if (errorBanner) {
+      errorBanner.classList.add('hidden');
+    }
+  }
 
   // Stats from Evaluation
   const evalData = data.evaluation || { ready: [], inProgress: [], blocked: [], completed: [] };
@@ -84,11 +157,34 @@ function renderProject(data) {
     goalEl.innerHTML = `<p style="color:var(--text-muted); font-size:13px;">No goals defined. Run 'keel goal create' to set an outcome.</p>`;
   }
 
-  // Kanban Columns
-  renderColumnCards('cards-ready', evalData.ready || [], 'ready', true);
-  renderColumnCards('cards-inprogress', evalData.inProgress || [], 'in_progress', false);
-  renderColumnCards('cards-blocked', evalData.blocked || [], 'blocked', true);
-  renderColumnCards('cards-completed', evalData.completed || [], 'completed', false);
+  // Kanban Columns Data Fallback if Evaluation Failed / Cycle
+  let readyCards = evalData.ready || [];
+  let inProgressCards = evalData.inProgress || [];
+  let blockedCards = evalData.blocked || [];
+  let completedCards = evalData.completed || [];
+
+  if (data.graphError && data.tasks && data.tasks.length > 0) {
+    // If cycle occurred, evaluation is empty. Fall back to raw task status to prevent board collapse
+    readyCards = data.tasks.filter(t => t.status === 'ready' || t.status === 'pending').map(t => ({ task: t }));
+    inProgressCards = data.tasks.filter(t => t.status === 'in_progress').map(t => ({ task: t }));
+    blockedCards = data.tasks.filter(t => t.status === 'blocked').map(t => ({ task: t, blockers: [data.graphError] }));
+    completedCards = data.tasks.filter(t => t.status === 'completed').map(t => ({ task: t }));
+  }
+
+  renderColumnCards('cards-ready', readyCards, 'ready', true);
+  renderColumnCards('cards-inprogress', inProgressCards, 'in_progress', false);
+  renderColumnCards('cards-blocked', blockedCards, 'blocked', true);
+  renderColumnCards('cards-completed', completedCards, 'completed', false);
+
+  if (updatedTaskIds.size > 0) {
+    updatedTaskIds.forEach(id => {
+      const card = document.querySelector(`.task-item[data-task-id="${id}"]`);
+      if (card) {
+        card.classList.add('just-updated');
+        setTimeout(() => card.classList.remove('just-updated'), 1300);
+      }
+    });
+  }
 
   filterTaskCards();
 
@@ -116,12 +212,46 @@ function renderProject(data) {
   }
 }
 
+const EMPTY_MESSAGES = {
+  ready: {
+    title: 'No Ready Tasks',
+    sub: 'Tasks with all dependencies completed will appear here.',
+    icon: ICONS.rocket
+  },
+  in_progress: {
+    title: 'No Active Tasks',
+    sub: 'Work items currently in flight by agents appear here.',
+    icon: ICONS.clock
+  },
+  blocked: {
+    title: 'No Blocked Tasks',
+    sub: 'All task prerequisites are currently satisfied.',
+    icon: ICONS.check
+  },
+  completed: {
+    title: 'No Completed Tasks',
+    sub: 'Verified deliverables and completed items appear here.',
+    icon: ICONS.package
+  }
+};
+
 function renderColumnCards(containerId, items, categoryStatus, isWrapped) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
   if (items.length === 0) {
-    container.innerHTML = `<div style="color:var(--text-muted); font-size:12px; text-align:center; padding:20px 0;">Empty</div>`;
+    const meta = EMPTY_MESSAGES[categoryStatus] || {
+      title: 'Empty Column',
+      sub: 'No tasks in this category.',
+      icon: ICONS.package
+    };
+    container.innerHTML = `
+      <div class="empty-state-box">
+        <div class="empty-state-icon">${meta.icon}</div>
+        <div class="empty-state-title">${meta.title}</div>
+        <div class="empty-state-sub">${meta.sub}</div>
+      </div>
+    `;
     return;
   }
 
@@ -165,7 +295,7 @@ function renderTaskCard(task, categoryStatus, blockers) {
       <div style="flex: 1; padding-right: 8px;">
         <div class="task-id">
           <span>${escapeHtml(task.id)}</span>
-          <span class="prio-badge ${prioClass}">${escapeHtml(prio)}</span>
+          <span class="prio-badge ${prioClass}"><span class="prio-dot"></span><span>${escapeHtml(prio)}</span></span>
         </div>
         <div class="task-title">${escapeHtml(task.title)}</div>
         ${task.description ? `<div class="task-desc">${escapeHtml(task.description)}</div>` : ''}
@@ -185,12 +315,133 @@ const closeBtn = document.getElementById('drawer-close');
 function closeTaskDrawer() {
   if (drawer) drawer.classList.add('hidden');
   if (backdrop) backdrop.classList.add('hidden');
+  releaseFocus();
 }
 
 if (closeBtn) closeBtn.addEventListener('click', closeTaskDrawer);
 if (backdrop) backdrop.addEventListener('click', closeTaskDrawer);
+if (drawer) {
+  drawer.addEventListener('keydown', (e) => handleDialogKeyDown(e, drawer, closeTaskDrawer));
+}
+
+// Quick Task Creation Modal
+const newTaskModal = document.getElementById('new-task-modal');
+const newTaskBackdrop = document.getElementById('new-task-backdrop');
+const btnNewTask = document.getElementById('btn-new-task');
+const btnNewTaskClose = document.getElementById('modal-new-task-close');
+const btnCancelTask = document.getElementById('btn-cancel-task');
+const newTaskForm = document.getElementById('new-task-form');
+
+function showModalError(msg) {
+  const el = document.getElementById('modal-error-banner');
+  if (el) {
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+}
+
+function hideModalError() {
+  const el = document.getElementById('modal-error-banner');
+  if (el) {
+    el.textContent = '';
+    el.classList.add('hidden');
+  }
+}
+
+function openNewTaskModal() {
+  hideModalError();
+  if (newTaskModal) newTaskModal.classList.remove('hidden');
+  if (newTaskBackdrop) newTaskBackdrop.classList.remove('hidden');
+  if (newTaskModal) trapFocus(newTaskModal);
+}
+
+function closeNewTaskModal() {
+  hideModalError();
+  if (newTaskModal) newTaskModal.classList.add('hidden');
+  if (newTaskBackdrop) newTaskBackdrop.classList.add('hidden');
+  if (newTaskForm) newTaskForm.reset();
+  releaseFocus();
+}
+
+if (btnNewTask) btnNewTask.addEventListener('click', openNewTaskModal);
+if (btnNewTaskClose) btnNewTaskClose.addEventListener('click', closeNewTaskModal);
+if (btnCancelTask) btnCancelTask.addEventListener('click', closeNewTaskModal);
+if (newTaskBackdrop) newTaskBackdrop.addEventListener('click', closeNewTaskModal);
+if (newTaskModal) {
+  newTaskModal.addEventListener('keydown', (e) => handleDialogKeyDown(e, newTaskModal, closeNewTaskModal));
+}
+
+if (newTaskForm) {
+  newTaskForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = document.getElementById('task-input-title').value.trim();
+    if (!title) return;
+    const priority = document.getElementById('task-input-priority').value;
+    const assignee = document.getElementById('task-input-assignee').value.trim();
+    const description = document.getElementById('task-input-desc').value.trim();
+    const dependsRaw = document.getElementById('task-input-depends').value.trim();
+    const delivsRaw = document.getElementById('task-input-deliverables').value.trim();
+
+    const dependsOn = dependsRaw ? dependsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const deliverables = delivsRaw ? delivsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    const payload = {
+      title,
+      priority,
+      assignee,
+      description,
+      dependsOn,
+      deliverables,
+    };
+
+    try {
+      const res = await fetch('/api/task/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        showModalError('Failed to create task: ' + err);
+        return;
+      }
+      closeNewTaskModal();
+      const pRes = await fetch('/api/project');
+      if (pRes.ok) {
+        const pData = await pRes.json();
+        renderProject(pData);
+      }
+    } catch (err) {
+      console.error('Task creation error:', err);
+      showModalError('Task creation error: ' + err.message);
+    }
+  });
+}
+
+// Global Keyboard Shortcuts: '/' focuses task search, 'n' opens new task, 'Escape' closes modals
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeTaskDrawer();
+  const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+  const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
+
+  if (e.key === 'Escape') {
+    if (drawer && !drawer.classList.contains('hidden')) {
+      closeTaskDrawer();
+    }
+    if (newTaskModal && !newTaskModal.classList.contains('hidden')) {
+      closeNewTaskModal();
+    }
+    return;
+  }
+
+  if (!isInput) {
+    if (e.key === '/') {
+      e.preventDefault();
+      if (searchInput) searchInput.focus();
+    } else if (e.key === 'n' || e.key === 'N') {
+      e.preventDefault();
+      openNewTaskModal();
+    }
+  }
 });
 
 // Delegate click on task cards to open drawer
@@ -209,7 +460,7 @@ function openTaskDrawer(taskId) {
   const prioClass = 'prio-' + prio.toLowerCase();
   const drawerPrio = document.getElementById('drawer-prio');
   if (drawerPrio) {
-    drawerPrio.textContent = prio;
+    drawerPrio.innerHTML = `<span class="prio-dot"></span><span>${escapeHtml(prio)}</span>`;
     drawerPrio.className = 'prio-badge ' + prioClass;
   }
 
@@ -224,7 +475,12 @@ function openTaskDrawer(taskId) {
     let depsHtml = '<div style="color:var(--text-muted); font-size:13px;">None</div>';
     if (task.dependsOn && task.dependsOn.length > 0) {
       depsHtml = '<ul class="drawer-deps-list">' +
-        task.dependsOn.map(d => `<li><code>${escapeHtml(d)}</code></li>`).join('') +
+        task.dependsOn.map(depId => {
+          const depTask = currentTaskMap.get(depId);
+          const status = depTask ? depTask.status : 'missing';
+          const badgeClass = status === 'completed' ? 'badge completed' : (status === 'in_progress' ? 'badge in_progress' : (status === 'ready' ? 'badge ready' : 'badge blocked'));
+          return `<li style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding: 4px 0;"><code>${escapeHtml(depId)}</code> <span class="${badgeClass}">${escapeHtml(status.replace('_', ' '))}</span></li>`;
+        }).join('') +
         '</ul>';
     }
 
@@ -302,6 +558,7 @@ function openTaskDrawer(taskId) {
 
   if (drawer) drawer.classList.remove('hidden');
   if (backdrop) backdrop.classList.remove('hidden');
+  if (drawer) trapFocus(drawer);
 }
 
 async function updateTaskViaAPI(taskId, payload) {
@@ -313,7 +570,7 @@ async function updateTaskViaAPI(taskId, payload) {
     });
     if (!res.ok) {
       const errText = await res.text();
-      alert('Failed to update task: ' + errText);
+      console.error('Failed to update task: ' + errText);
       return;
     }
     closeTaskDrawer();
@@ -324,7 +581,6 @@ async function updateTaskViaAPI(taskId, payload) {
     }
   } catch (err) {
     console.error('Task update error:', err);
-    alert('Task update error: ' + err.message);
   }
 }
 

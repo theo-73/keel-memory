@@ -122,8 +122,66 @@ func TestDashboardEndpoints(t *testing.T) {
 		t.Errorf("expected task status in_progress, got %v, err: %v", updatedTask, err)
 	}
 
-	// 7. Test srv.Close() terminates without deadlock or panic
+	// 7. Test /api/task/create endpoint
+	createPayload := `{"title":"Create API Route","priority":"high","assignee":"human"}`
+	reqCreate := httptest.NewRequest("POST", "/api/task/create", strings.NewReader(createPayload))
+	wCreate := httptest.NewRecorder()
+	handler.ServeHTTP(wCreate, reqCreate)
+
+	if wCreate.Code != http.StatusCreated {
+		t.Errorf("expected 201 for /api/task/create, got %d: %s", wCreate.Code, wCreate.Body.String())
+	}
+	createdTask, err := s.GetTask("create-api-route")
+	if err != nil || createdTask.Title != "Create API Route" {
+		t.Errorf("expected created task, got %v, err: %v", createdTask, err)
+	}
+
+	// 8. Test cross-origin security on mutation endpoints
+	reqBadPost := httptest.NewRequest("POST", "/api/task/create", strings.NewReader(createPayload))
+	reqBadPost.Header.Set("Origin", "https://evil-site.com")
+	wBadPost := httptest.NewRecorder()
+	handler.ServeHTTP(wBadPost, reqBadPost)
+	if wBadPost.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for bad origin on POST, got %d", wBadPost.Code)
+	}
+
+	// 9. Test srv.Notify() and Close()
+	srv.Notify()
 	srv.Close()
 	// Multiple close should be safe
 	srv.Close()
+}
+
+func TestDashboardCycleDetectionNotice(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "keel-dashboard-cycle-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s, err := store.Init(tmpDir, "Cycle Dashboard Test", "Testing cycle detection notice")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = s.CreateTask(model.Task{ID: "t-a", Title: "Task A", Status: "pending", DependsOn: []string{"t-b"}})
+	_ = s.CreateTask(model.Task{ID: "t-b", Title: "Task B", Status: "pending", DependsOn: []string{"t-a"}})
+
+	srv := NewServer(s)
+	defer srv.Close()
+
+	req := httptest.NewRequest("GET", "/api/project", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var view ProjectView
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(view.GraphError), "dependency cycle detected") {
+		t.Errorf("expected GraphError to report dependency cycle, got %q", view.GraphError)
+	}
 }

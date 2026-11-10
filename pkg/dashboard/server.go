@@ -25,24 +25,34 @@ type ProjectView struct {
 	Goals         []model.Goal          `json:"goals"`
 	Tasks         []model.Task          `json:"tasks"`
 	Evaluation    taskgraph.GraphResult `json:"evaluation"`
+	GraphError    string                `json:"graphError,omitempty"`
 	LatestWorklog *model.WorklogEntry   `json:"latestWorklog,omitempty"`
 }
 
 type Server struct {
-	store   *store.Store
-	clients map[chan []byte]bool
-	mu      sync.Mutex
-	stopCh  chan struct{}
+	store    *store.Store
+	clients  map[chan []byte]bool
+	mu       sync.Mutex
+	stopCh   chan struct{}
+	notifyCh chan struct{}
 }
 
 func NewServer(s *store.Store) *Server {
 	srv := &Server{
-		store:   s,
-		clients: make(map[chan []byte]bool),
-		stopCh:  make(chan struct{}),
+		store:    s,
+		clients:  make(map[chan []byte]bool),
+		stopCh:   make(chan struct{}),
+		notifyCh: make(chan struct{}, 16),
 	}
 	go srv.pollProjectChanges()
 	return srv
+}
+
+func (s *Server) Notify() {
+	select {
+	case s.notifyCh <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Server) Close() {
@@ -66,7 +76,11 @@ func (s *Server) LoadView() (ProjectView, error) {
 	}
 	goals, _ := s.store.ListGoals()
 	tasks, _ := s.store.ListTasks()
-	eval, _ := taskgraph.Evaluate(tasks)
+	eval, evalErr := taskgraph.Evaluate(tasks)
+	var graphErrStr string
+	if evalErr != nil {
+		graphErrStr = evalErr.Error()
+	}
 	latestLog, _ := s.store.LatestWorklog()
 
 	return ProjectView{
@@ -75,6 +89,7 @@ func (s *Server) LoadView() (ProjectView, error) {
 		Goals:         goals,
 		Tasks:         tasks,
 		Evaluation:    eval,
+		GraphError:    graphErrStr,
 		LatestWorklog: latestLog,
 	}, nil
 }
@@ -86,14 +101,10 @@ func (s *Server) Handler() http.Handler {
 	fileServer := http.FileServer(http.FS(staticSub))
 
 	// Static files
-	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", fileServer))
 
 	// Root HTML
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		data, err := staticFS.ReadFile("static/index.html")
 		if err != nil {
 			http.Error(w, "Error loading UI", http.StatusInternalServerError)
@@ -104,7 +115,7 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// JSON API
-	mux.HandleFunc("/api/project", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/project", func(w http.ResponseWriter, r *http.Request) {
 		view, err := s.LoadView()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -115,7 +126,7 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Brief endpoint for 1-click clipboard copy
-	mux.HandleFunc("/api/brief", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/brief", func(w http.ResponseWriter, r *http.Request) {
 		b, err := brief.Generate(s.store)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -127,12 +138,59 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
-	// Task Action endpoint for Human-in-the-Loop supervision
-	mux.HandleFunc("/api/task/update", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// Task Creation endpoint for Quick Task Modal
+	mux.HandleFunc("POST /api/task/create", func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			ID           string   `json:"id"`
+			GoalID       string   `json:"goalId"`
+			Title        string   `json:"title"`
+			Description  string   `json:"description"`
+			Status       string   `json:"status"`
+			Priority     string   `json:"priority"`
+			Assignee     string   `json:"assignee"`
+			DependsOn    []string `json:"dependsOn"`
+			Deliverables []string `json:"deliverables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		if strings.TrimSpace(payload.Title) == "" {
+			http.Error(w, "Task title is required", http.StatusBadRequest)
+			return
+		}
+		if payload.ID == "" {
+			payload.ID = s.store.GenerateUniqueTaskID(payload.Title)
+		}
+		if payload.Status == "" {
+			payload.Status = "pending"
+		}
+		task := model.Task{
+			ID:           payload.ID,
+			GoalID:       payload.GoalID,
+			Title:        payload.Title,
+			Description:  payload.Description,
+			Status:       payload.Status,
+			Priority:     payload.Priority,
+			Assignee:     payload.Assignee,
+			DependsOn:    payload.DependsOn,
+			Deliverables: payload.Deliverables,
+		}
+		if err := s.store.CreateTask(task); err != nil {
+			http.Error(w, "Failed to create task: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.Notify()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"task":    task,
+		})
+	})
+
+	// Task Action endpoint for Human-in-the-Loop supervision
+	mux.HandleFunc("POST /api/task/update", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			ID            string `json:"id"`
 			Status        string `json:"status"`
@@ -169,6 +227,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.Notify()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
@@ -177,21 +236,11 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Server-Sent Events (SSE) for Real-Time UI updates
-	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 			return
-		}
-
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			if strings.HasPrefix(origin, "http://127.0.0.1:") || strings.HasPrefix(origin, "http://localhost:") {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			} else {
-				http.Error(w, "Cross-origin request rejected", http.StatusForbidden)
-				return
-			}
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -235,8 +284,25 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 
-	// Wrap with security headers middleware
+	// Wrap with security headers & strict origin verification middleware
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			origin := r.Header.Get("Origin")
+			if origin != "" {
+				if strings.HasPrefix(origin, "http://127.0.0.1:") || strings.HasPrefix(origin, "http://localhost:") {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+					if r.Method == http.MethodOptions {
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+				} else {
+					http.Error(w, "Cross-origin request rejected", http.StatusForbidden)
+					return
+				}
+			}
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self';")
@@ -249,30 +315,36 @@ func (s *Server) pollProjectChanges() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	broadcast := func(force bool) {
+		st, err := s.store.State()
+		if err != nil {
+			return
+		}
+		if force || st.UpdatedAt.After(lastStateTime) {
+			lastStateTime = st.UpdatedAt
+			view, err := s.LoadView()
+			if err == nil {
+				data, _ := json.Marshal(view)
+				s.mu.Lock()
+				for client := range s.clients {
+					select {
+					case client <- data:
+					default:
+					}
+				}
+				s.mu.Unlock()
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
-			st, err := s.store.State()
-			if err != nil {
-				continue
-			}
-			if st.UpdatedAt.After(lastStateTime) {
-				lastStateTime = st.UpdatedAt
-				view, err := s.LoadView()
-				if err == nil {
-					data, _ := json.Marshal(view)
-					s.mu.Lock()
-					for client := range s.clients {
-						select {
-						case client <- data:
-						default:
-						}
-					}
-					s.mu.Unlock()
-				}
-			}
+			broadcast(false)
+		case <-s.notifyCh:
+			broadcast(true)
 		}
 	}
 }

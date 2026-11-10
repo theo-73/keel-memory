@@ -11,9 +11,13 @@
     <header>
       <div class="brand">
         <span class="logo-badge">KEEL</span>
-        <h1 id="project-name">Loading Project...</h1>
+        <h1 id="project-name"><span class="skeleton" style="width: 180px; height: 20px;"></span></h1>
       </div>
       <div class="header-actions">
+        <button id="btn-new-task" class="btn-action btn-primary" title="Create a new task">
+          <svg class="icon-svg" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>New Task</span>
+        </button>
         <button id="btn-copy-brief" class="btn-action" title="Copy project brief for AI agent">
           <svg class="icon-svg" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
           <span id="btn-copy-brief-text">Copy Brief</span>
@@ -24,6 +28,17 @@
         </div>
       </div>
     </header>
+
+    <!-- Task Dependency Cycle or Risk Warning Banner -->
+    <div id="graph-error-banner" class="alert-box-danger hidden" role="alert">
+      <div class="alert-icon">
+        <svg class="icon-svg" viewBox="0 0 24 24"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      </div>
+      <div class="alert-content">
+        <div class="alert-title">Task Dependency Cycle Detected</div>
+        <div id="graph-error-message" class="alert-message"></div>
+      </div>
+    </div>
 
     <!-- Top KPI Metric Cards (5 Cards) -->
     <div class="summary-grid" role="region" aria-label="Project Status Summary" aria-live="polite">
@@ -60,7 +75,8 @@
         <h2 class="section-title">Active Objective & Goal</h2>
       </div>
       <div id="goal-content">
-        <p style="color:var(--text-muted); font-size:13px;">Loading goal...</p>
+        <span class="skeleton" style="width: 240px; height: 16px; margin-bottom: 8px;"></span><br>
+        <span class="skeleton" style="width: 180px; height: 13px;"></span>
       </div>
     </div>
 
@@ -98,7 +114,8 @@
         <h2 class="section-title">Latest Agent Session Log & Handoff</h2>
       </div>
       <div id="latest-worklog">
-        <p style="color:var(--text-muted); font-size:13px;">Loading session notes...</p>
+        <span class="skeleton" style="width: 220px; height: 14px; margin-bottom: 6px;"></span><br>
+        <span class="skeleton" style="width: 320px; height: 14px;"></span>
       </div>
     </div>
   </div>
@@ -115,6 +132,53 @@
     </div>
     <div id="drawer-body" class="drawer-body"></div>
     <div id="drawer-actions" class="drawer-footer"></div>
+  </div>
+
+  <!-- Quick Task Creation Modal -->
+  <div id="new-task-backdrop" class="drawer-backdrop hidden"></div>
+  <div id="new-task-modal" class="modal-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="modal-new-task-title">
+    <div class="modal-header">
+      <h3 id="modal-new-task-title" class="drawer-title">Create New Task</h3>
+      <button id="modal-new-task-close" class="btn-close" aria-label="Close task creation">&times;</button>
+    </div>
+    <form id="new-task-form" class="modal-form">
+      <div id="modal-error-banner" class="form-error-banner hidden" role="alert"></div>
+      <div class="form-group">
+        <label for="task-input-title" class="form-label">Task Title <span class="required">*</span></label>
+        <input type="text" id="task-input-title" class="form-input" placeholder="e.g. Implement OAuth2 token refresh" required />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="task-input-priority" class="form-label">Priority</label>
+          <select id="task-input-priority" class="form-select">
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="task-input-assignee" class="form-label">Assignee</label>
+          <input type="text" id="task-input-assignee" class="form-input" placeholder="e.g. claude, cursor, human" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="task-input-desc" class="form-label">Description</label>
+        <textarea id="task-input-desc" class="form-textarea" rows="3" placeholder="Detailed requirements and context for the agent..."></textarea>
+      </div>
+      <div class="form-group">
+        <label for="task-input-depends" class="form-label">Prerequisites (Depends On)</label>
+        <input type="text" id="task-input-depends" class="form-input" placeholder="Comma-separated task IDs (e.g. setup-db, api-scaffold)" />
+      </div>
+      <div class="form-group">
+        <label for="task-input-deliverables" class="form-label">Deliverables</label>
+        <input type="text" id="task-input-deliverables" class="form-input" placeholder="Comma-separated files or artifacts (e.g. auth.go, auth_test.go)" />
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-cancel-task" class="btn-secondary">Cancel</button>
+        <button type="submit" id="btn-submit-task" class="btn-primary">Create Task</button>
+      </div>
+    </form>
   </div>
 
   <script src="/static/app.js"></script>
