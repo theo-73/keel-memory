@@ -244,6 +244,7 @@ func (a *App) cmdWorklog(args []string) int {
 	harness := fs.String("harness", "cli-agent", "Agent name / harness (claude, cursor, etc.)")
 	next := fs.String("next", "", "Comma-separated list of next actions left for the next agent")
 	list := fs.Bool("list", false, "List recent worklogs")
+	limit := fs.Int("limit", 10, "Maximum number of recent worklogs to list (0 for all)")
 	asJSON := fs.Bool("json", false, "Output in JSON format")
 
 	if err := fs.Parse(reordered); err != nil {
@@ -261,6 +262,9 @@ func (a *App) cmdWorklog(args []string) int {
 		if err != nil {
 			fmt.Fprintf(a.Err, "Error: %v\n", err)
 			return 1
+		}
+		if *limit > 0 && len(logs) > *limit {
+			logs = logs[:*limit]
 		}
 		if *asJSON {
 			a.emitJSON(logs)

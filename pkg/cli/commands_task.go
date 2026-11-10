@@ -36,10 +36,11 @@ Subcommands:
 	switch sub {
 	case "create":
 		fs := flag.NewFlagSet("task create", flag.ContinueOnError)
-		id := fs.String("id", "", "Unique task slug (required)")
+		id := fs.String("id", "", "Unique task slug (optional, auto-generated from title if omitted)")
 		title := fs.String("title", "", "Task title (required)")
 		desc := fs.String("desc", "", "Task description")
 		priority := fs.String("priority", "medium", "Priority: low, medium, high, critical")
+		assignee := fs.String("assignee", "", "Assigned agent or human (e.g. claude, cursor, human)")
 		goalID := fs.String("goal", "", "Associated goal ID")
 		depends := fs.String("depends", "", "Comma-separated list of prerequisite task IDs")
 		deliverables := fs.String("deliverables", "", "Comma-separated list of expected deliverables")
@@ -47,9 +48,12 @@ Subcommands:
 		if err := fs.Parse(subArgs); err != nil {
 			return 1
 		}
-		if *id == "" || *title == "" {
-			fmt.Fprintf(a.Err, "Error: --id and --title flags are required\n")
+		if strings.TrimSpace(*title) == "" {
+			fmt.Fprintf(a.Err, "Error: --title flag is required\n")
 			return 1
+		}
+		if *id == "" {
+			*id = s.GenerateUniqueTaskID(*title)
 		}
 
 		prio := strings.ToLower(strings.TrimSpace(*priority))
@@ -86,6 +90,7 @@ Subcommands:
 			Title:        *title,
 			Description:  *desc,
 			Priority:     prio,
+			Assignee:     *assignee,
 			GoalID:       *goalID,
 			Status:       "pending",
 			DependsOn:    deps,
@@ -103,6 +108,8 @@ Subcommands:
 		fs := flag.NewFlagSet("task list", flag.ContinueOnError)
 		statusFilter := fs.String("status", "", "Filter by status: ready, blocked, pending, in_progress, completed")
 		goalFilter := fs.String("goal", "", "Filter tasks by goal ID")
+		assigneeFilter := fs.String("assignee", "", "Filter tasks by assignee")
+		priorityFilter := fs.String("priority", "", "Filter tasks by priority: low, medium, high, critical")
 		asJSON := fs.Bool("json", false, "Output as JSON")
 
 		if err := fs.Parse(subArgs); err != nil {
@@ -154,6 +161,28 @@ Subcommands:
 			filtered = byGoal
 		}
 
+		if *assigneeFilter != "" {
+			af := strings.TrimSpace(*assigneeFilter)
+			byAssignee := make([]model.Task, 0)
+			for _, t := range filtered {
+				if strings.EqualFold(t.Assignee, af) {
+					byAssignee = append(byAssignee, t)
+				}
+			}
+			filtered = byAssignee
+		}
+
+		if *priorityFilter != "" {
+			pf := strings.ToLower(strings.TrimSpace(*priorityFilter))
+			byPriority := make([]model.Task, 0)
+			for _, t := range filtered {
+				if strings.ToLower(t.Priority) == pf {
+					byPriority = append(byPriority, t)
+				}
+			}
+			filtered = byPriority
+		}
+
 		if *asJSON {
 			a.emitJSON(filtered)
 			return 0
@@ -164,10 +193,156 @@ Subcommands:
 			return 0
 		}
 
-		fmt.Fprintf(a.Out, "%-18s %-12s %-10s %s\n", "ID", "STATUS", "PRIORITY", "TITLE")
-		fmt.Fprintf(a.Out, "%s\n", strings.Repeat("-", 60))
+		fmt.Fprintf(a.Out, "%-18s %-12s %-10s %-12s %s\n", "ID", "STATUS", "PRIORITY", "ASSIGNEE", "TITLE")
+		fmt.Fprintf(a.Out, "%s\n", strings.Repeat("-", 72))
 		for _, t := range filtered {
-			fmt.Fprintf(a.Out, "%-18s %-12s %-10s %s\n", t.ID, t.Status, t.Priority, t.Title)
+			assignee := t.Assignee
+			if assignee == "" {
+				assignee = "-"
+			}
+			fmt.Fprintf(a.Out, "%-18s %-12s %-10s %-12s %s\n", t.ID, t.Status, t.Priority, assignee, t.Title)
+		}
+		return 0
+
+	case "tree", "graph":
+		fs := flag.NewFlagSet("task tree", flag.ContinueOnError)
+		fs.SetOutput(a.Err)
+		goalFilter := fs.String("goal", "", "Filter tree by goal ID")
+		asJSON := fs.Bool("json", false, "Output in JSON format")
+		if err := fs.Parse(subArgs); err != nil {
+			return 1
+		}
+
+		tasks, err := s.ListTasks()
+		if err != nil {
+			fmt.Fprintf(a.Err, "Error: %v\n", err)
+			return 1
+		}
+		if *goalFilter != "" {
+			var filtered []model.Task
+			for _, t := range tasks {
+				if t.GoalID == *goalFilter {
+					filtered = append(filtered, t)
+				}
+			}
+			tasks = filtered
+		}
+		if len(tasks) == 0 {
+			fmt.Fprintln(a.Out, "No tasks found.")
+			return 0
+		}
+
+		eval, _ := taskgraph.Evaluate(tasks)
+		readyMap := make(map[string]bool)
+		for _, r := range eval.Ready {
+			readyMap[r.Task.ID] = true
+		}
+		blockedMap := make(map[string][]string)
+		for _, b := range eval.Blocked {
+			blockedMap[b.Task.ID] = b.Blockers
+		}
+
+		if *asJSON {
+			a.emitJSON(map[string]any{
+				"tasks":      tasks,
+				"evaluation": eval,
+			})
+			return 0
+		}
+
+		taskByID := make(map[string]model.Task)
+		childrenMap := make(map[string][]string)
+		hasPrereqs := make(map[string]bool)
+
+		for _, t := range tasks {
+			taskByID[t.ID] = t
+			if len(t.DependsOn) > 0 {
+				hasPrereqs[t.ID] = true
+				for _, p := range t.DependsOn {
+					childrenMap[p] = append(childrenMap[p], t.ID)
+				}
+			}
+		}
+
+		var rootIDs []string
+		for _, t := range tasks {
+			if !hasPrereqs[t.ID] {
+				rootIDs = append(rootIDs, t.ID)
+			}
+		}
+		if len(rootIDs) == 0 {
+			for _, t := range tasks {
+				rootIDs = append(rootIDs, t.ID)
+			}
+		}
+
+		statusBadge := func(t model.Task) string {
+			st := strings.ToUpper(t.Status)
+			if readyMap[t.ID] {
+				return "[READY]"
+			}
+			if len(blockedMap[t.ID]) > 0 {
+				return "[BLOCKED]"
+			}
+			return "[" + st + "]"
+		}
+
+		fmt.Fprintln(a.Out, "Task Dependency Tree:")
+		printed := make(map[string]bool)
+
+		var printNode func(id string, prefix string, isLast bool)
+		printNode = func(id string, prefix string, isLast bool) {
+			t, exists := taskByID[id]
+			if !exists {
+				return
+			}
+			printed[id] = true
+			connector := "├── "
+			if isLast {
+				connector = "└── "
+			}
+
+			badge := statusBadge(t)
+			prio := ""
+			if t.Priority != "" {
+				prio = fmt.Sprintf(" [%s]", strings.ToUpper(t.Priority))
+			}
+			blockerInfo := ""
+			if len(blockedMap[t.ID]) > 0 {
+				blockerInfo = fmt.Sprintf(" (waiting on: %s)", strings.Join(blockedMap[t.ID], ", "))
+			}
+
+			fmt.Fprintf(a.Out, "%s%s%-11s %-16s%s %s%s\n", prefix, connector, badge, t.ID, prio, t.Title, blockerInfo)
+
+			children := childrenMap[id]
+			newPrefix := prefix
+			if isLast {
+				newPrefix += "    "
+			} else {
+				newPrefix += "│   "
+			}
+			for i, chID := range children {
+				isLastChild := i == len(children)-1
+				if printed[chID] {
+					childConn := "├── "
+					if isLastChild {
+						childConn = "└── "
+					}
+					fmt.Fprintf(a.Out, "%s%s%-11s %-16s (multi-parent, see above)\n", newPrefix, childConn, "[LINK]", chID)
+				} else {
+					printNode(chID, newPrefix, isLastChild)
+				}
+			}
+		}
+
+		for i, rid := range rootIDs {
+			printNode(rid, "", i == len(rootIDs)-1)
+		}
+
+		for _, t := range tasks {
+			if !printed[t.ID] {
+				printNode(t.ID, "", true)
+			}
 		}
 		return 0
 

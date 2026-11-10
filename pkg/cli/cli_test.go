@@ -151,13 +151,37 @@ func TestCLIFullWorkflow(t *testing.T) {
 	}
 
 	// 15. Test task unblock, clear-deps, and doctor missing dependencies detection
-	out, code = runCmd("task", "create", "--id", "t-broken", "--title", "Broken Task", "--depends", "nonexistent-task")
+	out, code = runCmd("task", "create", "--id", "t-broken", "--title", "Broken Task", "--depends", "nonexistent-task", "--assignee", "claude", "--priority", "high")
 	if code != 0 {
 		t.Fatalf("task create broken failed: %s", out)
 	}
 	out, code = runCmd("doctor")
 	if code == 0 || !strings.Contains(out, "Broken Task Dependencies Detected") {
 		t.Fatalf("doctor should fail on missing dependency, got: code=%d, out=%s", code, out)
+	}
+
+	// Test task filtering by assignee and priority
+	out, code = runCmd("task", "list", "--assignee", "claude", "--priority", "high")
+	if code != 0 || !strings.Contains(out, "t-broken") {
+		t.Fatalf("task list with assignee and priority failed: %s", out)
+	}
+
+	// Test task tree visualization
+	out, code = runCmd("task", "tree")
+	if code != 0 || !strings.Contains(out, "Task Dependency Tree") {
+		t.Fatalf("task tree failed: %s", out)
+	}
+
+	// Test worklog list with pagination limit
+	out, code = runCmd("worklog", "--list", "--limit", "1")
+	if code != 0 || !strings.Contains(out, "Cached auth tokens") {
+		t.Fatalf("worklog --list --limit failed: %s", out)
+	}
+
+	// Test doctor --fix auto-repair
+	out, code = runCmd("doctor", "--fix")
+	if code != 0 || !strings.Contains(out, "Auto-repairing broken task dependencies") {
+		t.Fatalf("doctor --fix failed to repair: code=%d, out=%s", code, out)
 	}
 	runCmd("task", "delete", "t-broken")
 

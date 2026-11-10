@@ -118,6 +118,13 @@ func (a *App) cmdServe(args []string) int {
 }
 
 func (a *App) cmdDoctor(args []string) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(a.Err)
+	autoFix := fs.Bool("fix", false, "Automatically repair broken dependencies and orphaned references")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
 	s, err := a.getStore()
 	if err != nil {
 		fmt.Fprintf(a.Err, "Error: %v\n", err)
@@ -202,11 +209,37 @@ func (a *App) cmdDoctor(args []string) int {
 		}
 	}
 	if len(missingBlockers) > 0 {
-		fmt.Fprintf(a.Err, "\n⚠️  Broken Task Dependencies Detected:\n")
-		for _, m := range missingBlockers {
-			fmt.Fprintf(a.Err, "    - %s\n", m)
+		if *autoFix {
+			fmt.Fprintf(a.Out, "🔧 Auto-repairing broken task dependencies...\n")
+			taskMap := make(map[string]bool)
+			for _, t := range tasks {
+				taskMap[t.ID] = true
+			}
+			for _, t := range tasks {
+				var validDeps []string
+				changed := false
+				for _, dep := range t.DependsOn {
+					if taskMap[dep] {
+						validDeps = append(validDeps, dep)
+					} else {
+						changed = true
+					}
+				}
+				if changed {
+					t.DependsOn = validDeps
+					_ = s.UpdateTask(t)
+				}
+			}
+			_ = s.ReconcileState()
+			tasks, _ = s.ListTasks()
+			eval, _ = taskgraph.Evaluate(tasks)
+		} else {
+			fmt.Fprintf(a.Err, "\n⚠️  Broken Task Dependencies Detected (run 'keel doctor --fix' to repair):\n")
+			for _, m := range missingBlockers {
+				fmt.Fprintf(a.Err, "    - %s\n", m)
+			}
+			return 1
 		}
-		return 1
 	}
 
 	// 4. Goals check
@@ -219,18 +252,30 @@ func (a *App) cmdDoctor(args []string) int {
 
 	hasGoalIssues := false
 	if state.CurrentGoalID != "" && !goalSet[state.CurrentGoalID] {
-		fmt.Fprintf(a.Err, "\n⚠️  Active goal %q no longer exists in goals/\n", state.CurrentGoalID)
-		hasGoalIssues = true
+		if *autoFix {
+			fmt.Fprintf(a.Out, "🔧 Unlinking missing current goal %q from state...\n", state.CurrentGoalID)
+			state.CurrentGoalID = ""
+			_ = s.SaveState(state)
+		} else {
+			fmt.Fprintf(a.Err, "\n⚠️  Active goal %q no longer exists in goals/\n", state.CurrentGoalID)
+			hasGoalIssues = true
+		}
 	}
 
 	var orphanedTasks []string
 	for _, t := range tasks {
 		if t.GoalID != "" && !goalSet[t.GoalID] {
-			orphanedTasks = append(orphanedTasks, fmt.Sprintf("Task %q references missing goal %q", t.ID, t.GoalID))
+			if *autoFix {
+				fmt.Fprintf(a.Out, "🔧 Unlinking missing goal %q from task %q...\n", t.GoalID, t.ID)
+				t.GoalID = ""
+				_ = s.UpdateTask(t)
+			} else {
+				orphanedTasks = append(orphanedTasks, fmt.Sprintf("Task %q references missing goal %q", t.ID, t.GoalID))
+			}
 		}
 	}
 	if len(orphanedTasks) > 0 {
-		fmt.Fprintf(a.Err, "\n⚠️  Tasks with Missing Goals Detected:\n")
+		fmt.Fprintf(a.Err, "\n⚠️  Tasks with Missing Goals Detected (run 'keel doctor --fix' to repair):\n")
 		for _, o := range orphanedTasks {
 			fmt.Fprintf(a.Err, "    - %s\n", o)
 		}
@@ -238,6 +283,12 @@ func (a *App) cmdDoctor(args []string) int {
 	}
 	if hasGoalIssues {
 		return 1
+	}
+
+	// Re-reconcile state if auto-fixed
+	if *autoFix {
+		_ = s.ReconcileState()
+		state, _ = s.State()
 	}
 
 	// 5. Worklogs check
@@ -249,6 +300,10 @@ func (a *App) cmdDoctor(args []string) int {
 		return 1
 	}
 
-	fmt.Fprintf(a.Out, "\n🎉 Project is healthy and ready for autonomous agent sessions.\n")
+	if *autoFix {
+		fmt.Fprintf(a.Out, "\n🎉 All checks passed. Any repairable issues have been auto-fixed.\n")
+	} else {
+		fmt.Fprintf(a.Out, "\n🎉 Project is healthy and ready for autonomous agent sessions.\n")
+	}
 	return 0
 }
