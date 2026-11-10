@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"keel/pkg/brief"
 	"keel/pkg/model"
 	"keel/pkg/store"
 	"keel/pkg/taskgraph"
@@ -31,15 +32,27 @@ type Server struct {
 	store   *store.Store
 	clients map[chan []byte]bool
 	mu      sync.Mutex
+	stopCh  chan struct{}
 }
 
 func NewServer(s *store.Store) *Server {
 	srv := &Server{
 		store:   s,
 		clients: make(map[chan []byte]bool),
+		stopCh:  make(chan struct{}),
 	}
 	go srv.pollProjectChanges()
 	return srv
+}
+
+func (s *Server) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.stopCh:
+	default:
+		close(s.stopCh)
+	}
 }
 
 func (s *Server) LoadView() (ProjectView, error) {
@@ -99,6 +112,19 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(view)
+	})
+
+	// Brief endpoint for 1-click clipboard copy
+	mux.HandleFunc("/api/brief", func(w http.ResponseWriter, r *http.Request) {
+		b, err := brief.Generate(s.store)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"brief": b.FormatTerminal(),
+		})
 	})
 
 	// Server-Sent Events (SSE) for Real-Time UI updates
@@ -174,24 +200,29 @@ func (s *Server) pollProjectChanges() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		st, err := s.store.State()
-		if err != nil {
-			continue
-		}
-		if st.UpdatedAt.After(lastStateTime) {
-			lastStateTime = st.UpdatedAt
-			view, err := s.LoadView()
-			if err == nil {
-				data, _ := json.Marshal(view)
-				s.mu.Lock()
-				for client := range s.clients {
-					select {
-					case client <- data:
-					default:
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			st, err := s.store.State()
+			if err != nil {
+				continue
+			}
+			if st.UpdatedAt.After(lastStateTime) {
+				lastStateTime = st.UpdatedAt
+				view, err := s.LoadView()
+				if err == nil {
+					data, _ := json.Marshal(view)
+					s.mu.Lock()
+					for client := range s.clients {
+						select {
+						case client <- data:
+						default:
+						}
 					}
+					s.mu.Unlock()
 				}
-				s.mu.Unlock()
 			}
 		}
 	}

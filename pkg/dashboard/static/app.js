@@ -11,6 +11,8 @@ const ICONS = {
 };
 
 let lastPayloadHash = '';
+const currentTaskMap = new Map();
+const currentGoalMap = new Map();
 
 function renderProject(data) {
   const currentHash = JSON.stringify(data);
@@ -18,6 +20,16 @@ function renderProject(data) {
     return;
   }
   lastPayloadHash = currentHash;
+
+  // Update in-memory caches
+  currentTaskMap.clear();
+  if (data.tasks) {
+    data.tasks.forEach(t => currentTaskMap.set(t.id, t));
+  }
+  currentGoalMap.clear();
+  if (data.goals) {
+    data.goals.forEach(g => currentGoalMap.set(g.id, g));
+  }
 
   document.getElementById('project-name').textContent = data.manifest.name;
   document.getElementById('project-phase').textContent = 'Phase: ' + (data.state.currentPhase || 'Active');
@@ -30,7 +42,7 @@ function renderProject(data) {
 
   // Stats from Evaluation
   const evalData = data.evaluation || { ready: [], inProgress: [], blocked: [], completed: [] };
-  const total = data.tasks ? data.tasks.length : 0;
+  const activeTasks = data.tasks ? data.tasks.filter(t => t.status !== 'cancelled') : [];
   const readyCount = evalData.ready ? evalData.ready.length : 0;
   const inProgressCount = evalData.inProgress ? evalData.inProgress.length : 0;
   const blockedCount = evalData.blocked ? evalData.blocked.length : 0;
@@ -39,7 +51,7 @@ function renderProject(data) {
   document.getElementById('stat-ready').textContent = readyCount;
   document.getElementById('stat-active').textContent = inProgressCount;
   document.getElementById('stat-blocked').textContent = blockedCount;
-  document.getElementById('stat-completed').textContent = `${completedCount} / ${total}`;
+  document.getElementById('stat-completed').textContent = `${completedCount} / ${activeTasks.length}`;
 
   // Update Column Header Titles with SVG Icons
   document.getElementById('title-ready').innerHTML = `${ICONS.rocket} Ready`;
@@ -147,7 +159,7 @@ function renderTaskCard(task, categoryStatus, blockers) {
   }
 
   return `
-    <div class="task-item">
+    <div class="task-item" data-task-id="${escapeHtml(task.id)}" title="Click to view full details">
       <div style="flex: 1; padding-right: 8px;">
         <div class="task-id">
           <span>${escapeHtml(task.id)}</span>
@@ -161,6 +173,133 @@ function renderTaskCard(task, categoryStatus, blockers) {
       </div>
     </div>
   `;
+}
+
+// Slide-Over Detail Drawer Modal
+const drawer = document.getElementById('task-drawer');
+const backdrop = document.getElementById('task-drawer-backdrop');
+const closeBtn = document.getElementById('drawer-close');
+
+function closeTaskDrawer() {
+  if (drawer) drawer.classList.add('hidden');
+  if (backdrop) backdrop.classList.add('hidden');
+}
+
+if (closeBtn) closeBtn.addEventListener('click', closeTaskDrawer);
+if (backdrop) backdrop.addEventListener('click', closeTaskDrawer);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeTaskDrawer();
+});
+
+// Delegate click on task cards to open drawer
+document.addEventListener('click', (e) => {
+  const item = e.target.closest('.task-item');
+  if (item && item.dataset.taskId) {
+    openTaskDrawer(item.dataset.taskId);
+  }
+});
+
+function openTaskDrawer(taskId) {
+  const task = currentTaskMap.get(taskId);
+  if (!task) return;
+
+  const prio = task.priority || 'medium';
+  const prioClass = 'prio-' + prio.toLowerCase();
+  const drawerPrio = document.getElementById('drawer-prio');
+  if (drawerPrio) {
+    drawerPrio.textContent = prio;
+    drawerPrio.className = 'prio-badge ' + prioClass;
+  }
+
+  const drawerTitle = document.getElementById('drawer-title');
+  if (drawerTitle) drawerTitle.textContent = `${task.id}: ${task.title}`;
+
+  const goal = currentGoalMap.get(task.goalId);
+  const goalTitle = goal ? goal.title : (task.goalId || 'None');
+
+  const drawerBody = document.getElementById('drawer-body');
+  if (drawerBody) {
+    let depsHtml = '<div style="color:var(--text-muted); font-size:13px;">None</div>';
+    if (task.dependsOn && task.dependsOn.length > 0) {
+      depsHtml = '<ul class="drawer-deps-list">' +
+        task.dependsOn.map(d => `<li><code>${escapeHtml(d)}</code></li>`).join('') +
+        '</ul>';
+    }
+
+    let delivHtml = '<div style="color:var(--text-muted); font-size:13px;">None</div>';
+    if (task.deliverables && task.deliverables.length > 0) {
+      delivHtml = '<ul class="drawer-deliv-list">' +
+        task.deliverables.map(del => `<li>${escapeHtml(del)}</li>`).join('') +
+        '</ul>';
+    } else if (task.result) {
+      delivHtml = `<div class="drawer-text" style="color:var(--success); font-weight:600;">${escapeHtml(task.result)}</div>`;
+    }
+
+    let blockerHtml = '';
+    if (task.blockedReason) {
+      blockerHtml = `
+        <div class="drawer-section">
+          <div class="drawer-section-title" style="color:var(--danger);">Blocker Reason</div>
+          <div class="drawer-text" style="color:var(--danger);">${escapeHtml(task.blockedReason)}</div>
+        </div>`;
+    }
+
+    drawerBody.innerHTML = `
+      <div class="drawer-section">
+        <div class="drawer-section-title">Status & Assignment</div>
+        <div class="drawer-text">
+          <span class="badge ${task.status}">${task.status.replace('_', ' ')}</span>
+          ${task.assignee ? `<span style="margin-left: 10px; color:var(--text-secondary);">${ICONS.user} ${escapeHtml(task.assignee)}</span>` : ''}
+        </div>
+      </div>
+      <div class="drawer-section">
+        <div class="drawer-section-title">Associated Goal</div>
+        <div class="drawer-text" style="color:var(--accent); font-weight:600;">${escapeHtml(goalTitle)}</div>
+      </div>
+      <div class="drawer-section">
+        <div class="drawer-section-title">Description</div>
+        <div class="drawer-text">${escapeHtml(task.description || 'No description provided.')}</div>
+      </div>
+      ${blockerHtml}
+      <div class="drawer-section">
+        <div class="drawer-section-title">Prerequisites / Dependencies</div>
+        ${depsHtml}
+      </div>
+      <div class="drawer-section">
+        <div class="drawer-section-title">Deliverables & Results</div>
+        ${delivHtml}
+      </div>
+      <div class="drawer-section" style="border-top: 1px solid var(--border); padding-top: 14px; font-size: 12px; color: var(--text-muted);">
+        <div>Created: ${task.createdAt ? new Date(task.createdAt).toLocaleString() : 'N/A'}</div>
+        <div style="margin-top: 4px;">Updated: ${task.updatedAt ? new Date(task.updatedAt).toLocaleString() : 'N/A'}</div>
+      </div>
+    `;
+  }
+
+  if (drawer) drawer.classList.remove('hidden');
+  if (backdrop) backdrop.classList.remove('hidden');
+}
+
+// 1-Click Copy Brief for AI Agents
+const btnCopyBrief = document.getElementById('btn-copy-brief');
+const btnCopyBriefText = document.getElementById('btn-copy-brief-text');
+if (btnCopyBrief) {
+  btnCopyBrief.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/brief');
+      if (!res.ok) throw new Error('Failed to fetch brief');
+      const data = await res.json();
+      await navigator.clipboard.writeText(data.brief);
+      btnCopyBrief.classList.add('copied');
+      if (btnCopyBriefText) btnCopyBriefText.textContent = 'Copied!';
+      setTimeout(() => {
+        btnCopyBrief.classList.remove('copied');
+        if (btnCopyBriefText) btnCopyBriefText.textContent = 'Copy Brief';
+      }, 1500);
+    } catch (err) {
+      console.error('Clipboard copy error:', err);
+    }
+  });
 }
 
 function escapeHtml(text) {

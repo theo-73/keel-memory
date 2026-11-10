@@ -91,4 +91,25 @@ func TestDashboardEndpoints(t *testing.T) {
 	if wBadOrigin.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden for bad origin, got %d", wBadOrigin.Code)
 	}
+
+	// 5. /api/brief endpoint
+	reqBrief := httptest.NewRequest("GET", "/api/brief", nil)
+	wBrief := httptest.NewRecorder()
+	handler.ServeHTTP(wBrief, reqBrief)
+
+	if wBrief.Code != http.StatusOK {
+		t.Errorf("expected 200 for /api/brief, got %d", wBrief.Code)
+	}
+	var briefPayload map[string]string
+	if err := json.Unmarshal(wBrief.Body.Bytes(), &briefPayload); err != nil {
+		t.Fatalf("failed to unmarshal brief payload: %v", err)
+	}
+	if !strings.Contains(briefPayload["brief"], "Project Brief") {
+		t.Errorf("expected brief to contain Project Brief, got: %s", briefPayload["brief"])
+	}
+
+	// 6. Test srv.Close() terminates without deadlock or panic
+	srv.Close()
+	// Multiple close should be safe
+	srv.Close()
 }

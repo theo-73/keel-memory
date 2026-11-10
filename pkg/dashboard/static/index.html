@@ -13,9 +13,15 @@
         <span class="logo-badge">KEEL</span>
         <h1 id="project-name">Loading Project...</h1>
       </div>
-      <div class="live-indicator">
-        <span class="pulse-dot"></span>
-        <span id="connection-status">Live Connected</span>
+      <div class="header-actions">
+        <button id="btn-copy-brief" class="btn-action" title="Copy project brief for AI agent">
+          <svg class="icon-svg" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <span id="btn-copy-brief-text">Copy Brief</span>
+        </button>
+        <div class="live-indicator">
+          <span class="pulse-dot"></span>
+          <span id="connection-status">Live Connected</span>
+        </div>
       </div>
     </header>
 
@@ -92,6 +98,19 @@
         <p style="color:var(--text-muted); font-size:13px;">Loading session notes...</p>
       </div>
     </div>
+  </div>
+
+  <!-- Interactive Task Detail Drawer Modal -->
+  <div id="task-drawer-backdrop" class="drawer-backdrop hidden"></div>
+  <div id="task-drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="drawer-prio" class="prio-badge"></span>
+        <h3 id="drawer-title" class="drawer-title">Task Details</h3>
+      </div>
+      <button id="drawer-close" class="btn-close" aria-label="Close task details">&times;</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
   </div>
 
   <script src="/static/app.js"></script>
