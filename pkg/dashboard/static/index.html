@@ -66,8 +66,11 @@
 
     <!-- 4-Column Responsive Task Pipeline Grid -->
     <div class="section-box" role="region" aria-label="Task Pipeline" aria-live="polite">
-      <div class="section-header">
+      <div class="section-header" style="flex-wrap: wrap; gap: 12px;">
         <h2 class="section-title">Task Pipeline & Dependency Graph</h2>
+        <div class="search-wrapper">
+          <input type="text" id="task-search-input" class="search-input" placeholder="Search tasks by title, id, or tag..." aria-label="Search tasks" />
+        </div>
       </div>
       <div id="task-kanban" class="kanban-grid">
         <div class="kanban-col" id="col-ready">
@@ -111,6 +114,7 @@
       <button id="drawer-close" class="btn-close" aria-label="Close task details">&times;</button>
     </div>
     <div id="drawer-body" class="drawer-body"></div>
+    <div id="drawer-actions" class="drawer-footer"></div>
   </div>
 
   <script src="/static/app.js"></script>

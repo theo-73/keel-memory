@@ -517,6 +517,74 @@ h1 {
   margin-bottom: 4px;
 }
 
+/* Search Filter */
+.search-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  width: 240px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+/* Drawer Actions Footer */
+.drawer-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  background-color: var(--bg-card);
+}
+
+.btn-drawer-action {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  background-color: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+.btn-drawer-action:hover {
+  transform: translateY(-1px);
+}
+
+.btn-drawer-action.active-blue:hover {
+  background-color: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-drawer-action.active-green:hover {
+  background-color: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.btn-drawer-action.active-yellow:hover {
+  background-color: var(--warning-bg);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
 /* Reduced Motion Support */
 @media (prefers-reduced-motion: reduce) {
   .pulse-dot {

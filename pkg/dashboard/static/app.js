@@ -90,6 +90,8 @@ function renderProject(data) {
   renderColumnCards('cards-blocked', evalData.blocked || [], 'blocked', true);
   renderColumnCards('cards-completed', evalData.completed || [], 'completed', false);
 
+  filterTaskCards();
+
   // Worklog
   const worklogEl = document.getElementById('latest-worklog');
   if (data.latestWorklog) {
@@ -274,10 +276,85 @@ function openTaskDrawer(taskId) {
         <div style="margin-top: 4px;">Updated: ${task.updatedAt ? new Date(task.updatedAt).toLocaleString() : 'N/A'}</div>
       </div>
     `;
+
+    const drawerActions = document.getElementById('drawer-actions');
+    if (drawerActions) {
+      drawerActions.innerHTML = `
+        <button class="btn-drawer-action active-blue" id="btn-action-inprogress">Mark In Progress</button>
+        <button class="btn-drawer-action active-green" id="btn-action-complete">Mark Completed</button>
+        ${task.blockedReason ? `<button class="btn-drawer-action active-yellow" id="btn-action-clear-blocker">Clear Blocker</button>` : ''}
+      `;
+
+      const inProgressBtn = document.getElementById('btn-action-inprogress');
+      if (inProgressBtn) {
+        inProgressBtn.onclick = () => updateTaskViaAPI(task.id, { status: 'in_progress' });
+      }
+      const completeBtn = document.getElementById('btn-action-complete');
+      if (completeBtn) {
+        completeBtn.onclick = () => updateTaskViaAPI(task.id, { status: 'completed', result: 'Completed via Mission Control' });
+      }
+      const clearBlockerBtn = document.getElementById('btn-action-clear-blocker');
+      if (clearBlockerBtn) {
+        clearBlockerBtn.onclick = () => updateTaskViaAPI(task.id, { clearBlocker: true });
+      }
+    }
   }
 
   if (drawer) drawer.classList.remove('hidden');
   if (backdrop) backdrop.classList.remove('hidden');
+}
+
+async function updateTaskViaAPI(taskId, payload) {
+  try {
+    const res = await fetch('/api/task/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: taskId, ...payload })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      alert('Failed to update task: ' + errText);
+      return;
+    }
+    closeTaskDrawer();
+    const pRes = await fetch('/api/project');
+    if (pRes.ok) {
+      const pData = await pRes.json();
+      renderProject(pData);
+    }
+  } catch (err) {
+    console.error('Task update error:', err);
+    alert('Task update error: ' + err.message);
+  }
+}
+
+// Client-Side Task Filter by Title, ID, Description, or Assignee
+let currentSearchTerm = '';
+const searchInput = document.getElementById('task-search-input');
+if (searchInput) {
+  searchInput.addEventListener('input', (e) => {
+    currentSearchTerm = e.target.value.toLowerCase().trim();
+    filterTaskCards();
+  });
+}
+
+function filterTaskCards() {
+  const cards = document.querySelectorAll('.task-item');
+  cards.forEach(card => {
+    const taskId = card.dataset.taskId;
+    const task = currentTaskMap.get(taskId);
+    if (!task) return;
+    if (!currentSearchTerm) {
+      card.style.display = '';
+      return;
+    }
+    const match = (task.id && task.id.toLowerCase().includes(currentSearchTerm)) ||
+                  (task.title && task.title.toLowerCase().includes(currentSearchTerm)) ||
+                  (task.description && task.description.toLowerCase().includes(currentSearchTerm)) ||
+                  (task.assignee && task.assignee.toLowerCase().includes(currentSearchTerm)) ||
+                  (task.priority && task.priority.toLowerCase().includes(currentSearchTerm));
+    card.style.display = match ? '' : 'none';
+  });
 }
 
 // 1-Click Copy Brief for AI Agents

@@ -108,7 +108,21 @@ func TestDashboardEndpoints(t *testing.T) {
 		t.Errorf("expected brief to contain Project Brief, got: %s", briefPayload["brief"])
 	}
 
-	// 6. Test srv.Close() terminates without deadlock or panic
+	// 6. Test /api/task/update endpoint
+	updatePayload := `{"id":"t-1","status":"in_progress","result":"WIP"}`
+	reqUpdate := httptest.NewRequest("POST", "/api/task/update", strings.NewReader(updatePayload))
+	wUpdate := httptest.NewRecorder()
+	handler.ServeHTTP(wUpdate, reqUpdate)
+
+	if wUpdate.Code != http.StatusOK {
+		t.Errorf("expected 200 for /api/task/update, got %d: %s", wUpdate.Code, wUpdate.Body.String())
+	}
+	updatedTask, err := s.GetTask("t-1")
+	if err != nil || updatedTask.Status != "in_progress" {
+		t.Errorf("expected task status in_progress, got %v, err: %v", updatedTask, err)
+	}
+
+	// 7. Test srv.Close() terminates without deadlock or panic
 	srv.Close()
 	// Multiple close should be safe
 	srv.Close()

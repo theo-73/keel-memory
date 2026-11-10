@@ -127,6 +127,55 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
+	// Task Action endpoint for Human-in-the-Loop supervision
+	mux.HandleFunc("/api/task/update", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			BlockedReason string `json:"blockedReason"`
+			Result        string `json:"result"`
+			ClearBlocker  bool   `json:"clearBlocker"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if payload.ID == "" {
+			http.Error(w, "Task ID is required", http.StatusBadRequest)
+			return
+		}
+		task, err := s.store.GetTask(payload.ID)
+		if err != nil {
+			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+		if payload.Status != "" {
+			task.Status = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(payload.Status)), "-", "_")
+		}
+		if payload.BlockedReason != "" {
+			task.BlockedReason = payload.BlockedReason
+		}
+		if payload.Result != "" {
+			task.Result = payload.Result
+		}
+		if payload.ClearBlocker || (payload.Status != "" && payload.Status != "blocked" && payload.BlockedReason == "") {
+			task.BlockedReason = ""
+		}
+		if err := s.store.UpdateTask(task); err != nil {
+			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"task":    task,
+		})
+	})
+
 	// Server-Sent Events (SSE) for Real-Time UI updates
 	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
